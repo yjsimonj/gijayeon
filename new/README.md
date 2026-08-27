@@ -16,6 +16,9 @@ new/
 │  ├─ evaluate_phase2.py       2단계 평가 (McNemar 등)
 │  ├─ evaluate_phase3.py       3단계 A/B/C/D 재평가 (Cochran's Q 등)
 │  └─ plots.py                 그림 4종
+├─ .venv/              분석용 가상환경 (git 제외)
+├─ requirements.txt    분석 라이브러리 (최소 버전)
+├─ requirements-lock.txt  검증된 정확한 버전
 ├─ config/
 │  ├─ phase0_button_sizes.json      0단계 결과 집계로 생성 (최초엔 없음)
 │  └─ participant_gap_configs/      1단계 완료 시 웹앱이 내려주는 gap config 저장 위치
@@ -47,7 +50,7 @@ python -m http.server 8000
 4. **(검증, 선택)** — 3에서 내보낸 1단계 JSON에 대해
    ```
    cd new/analysis
-   python compute_sigma.py <경로>/phase1_<참가자ID>_*.json
+   ../.venv/Scripts/python.exe compute_sigma.py ../data/phase1_<참가자ID>_*.json
    ```
    출력된 `sigma_px`가 3번에서 웹앱이 내려준 gap config의 `sigma_px`와 일치하는지 대조한다. 불일치하면 웹앱/스크립트 중 하나에 버그가 있다는 뜻이므로 실험을 계속 진행하기 전에 원인을 확인할 것.
 5. **2단계(단일 버튼 평가)** — 설정 화면에서 2단계 선택, `phase0_button_sizes.json` 불러오기 → 시작 (120회, 1단계와 별개의 새 시행). 완료 후 JSON 내보내기.
@@ -55,31 +58,53 @@ python -m http.server 8000
 
 한 참가자에 대해 3 → 5 → 6 순서(1·2·3단계)를 반복하는 것이 본 실험의 단위다. 0단계(1~2번)는 전체 연구에서 한 번만 수행한다.
 
+## 분석 환경 준비 (가상환경)
+
+분석 라이브러리는 `new/.venv` 가상환경에 설치한다. 시스템 파이썬을 건드리지 않으므로 다른 프로젝트와 버전이 충돌하지 않는다.
+
+```bash
+cd new
+python -m venv .venv                        # 최초 1회만
+.venv/Scripts/python.exe -m pip install -r requirements.txt
+```
+
+macOS·Linux라면 `.venv/bin/python`. `requirements.txt`는 최소 버전만 지정하고, 실제로 검증한 정확한 버전은 `requirements-lock.txt`에 있다(재현이 필요하면 이쪽을 쓸 것).
+
+**활성화 없이 쓰는 방법** — 셸마다 활성화 명령이 달라 헷갈리므로, 아래 예시는 전부 venv의 파이썬을 직접 지정한다:
+
+```bash
+cd new/analysis
+PY=../.venv/Scripts/python.exe        # PowerShell: $PY = "..\.venv\Scripts\python.exe"
+$PY train_model.py ...
+```
+
+활성화하고 쓰려면 PowerShell에서 `.\.venv\Scripts\Activate.ps1`, Git Bash에서 `source .venv/Scripts/activate`.
+
 ## 분석 파이프라인
 
-의존 라이브러리: `pip install numpy scipy scikit-learn statsmodels matplotlib`
-
-데이터가 모인 뒤 이 순서로 돌린다 (경로는 `new/analysis/`에서 실행 기준):
+데이터가 모인 뒤 이 순서로 돌린다 (`new/analysis/`에서 실행, `$PY`는 위 참고):
 
 ```bash
 # 1단계 로그로 모델 학습 (교차검증 + 7.3절 3단 베이스라인 비교까지 출력)
-python train_model.py ../data/phase1_test01_*.json --out ../config/test01_model.json
+$PY train_model.py ../data/phase1_test01_*.json --out ../config/test01_model.json
 
 # 2단계 평가 — 새 데이터에 모델 적용, McNemar + 대응표본 검정
-python evaluate_phase2.py ../data/phase2_test01_*.json \
+$PY evaluate_phase2.py ../data/phase2_test01_*.json \
     --model ../config/test01_model.json \
     --phase1 ../data/phase1_test01_*.json \
     --out ../data/phase2_result_test01.json
 
 # 3단계 평가 — A/B/C/D 오프라인 재평가, 간격별 Cochran's Q + 사후 McNemar
-python evaluate_phase3.py ../data/phase3_test01_*.json \
+$PY evaluate_phase3.py ../data/phase3_test01_*.json \
     --model ../config/test01_model.json \
     --out ../data/phase3_result_test01.json
 
 # 그림
-python plots.py --phase1 ../data/phase1_test01_*.json \
+$PY plots.py --phase1 ../data/phase1_test01_*.json \
     --phase3-result ../data/phase3_result_test01.json --outdir ../figures
 ```
+
+웹앱을 띄우는 `python -m http.server`는 표준 라이브러리만 쓰므로 가상환경이 필요 없다.
 
 ### 모듈별 역할
 
