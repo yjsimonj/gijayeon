@@ -570,10 +570,15 @@ async function runBlock(trialSpecs, phase) {
 
 /* ---------------------- 6. σ/gap config 계산 ---------------------- */
 
+// timeout 시행은 제외하지 않는다. 명세서 4.3절("시간 초과 시행은 별도 플래그를
+// 남기되 제외하지 않음 — 속도-정확도 교환의 일부")과 일치시킨 것으로, 실측에서
+// timeout이 56%에 달해 제외하면 표본이 절반 이하로 줄고 느린(신중한) 시행만
+// 빠져 σ가 부풀려진다(실측 4.24 → 4.59px).
+// 클릭이 아예 없는 시행(무응답)은 오차를 정의할 수 없으므로 여전히 제외한다.
 function computeSigmaAndGaps(trials, participantId) {
   const sorted = trials.slice().sort((a, b) => a.trial_index - b.trial_index);
   const afterWarmup = sorted.slice(WARMUP_TRIALS_TO_EXCLUDE);
-  const used = afterWarmup.filter((t) => !t.timeout && t.click);
+  const used = afterWarmup.filter((t) => t.click);
 
   const distances = used.map((t) => distanceBetween(t.click.x, t.click.y, t.button.center_x, t.button.center_y));
   const n = distances.length;
@@ -587,7 +592,8 @@ function computeSigmaAndGaps(trials, participantId) {
     computed_at: new Date().toISOString(),
     n_trials_total: sorted.length,
     n_excluded_warmup: sorted.length - afterWarmup.length,
-    n_excluded_timeout: afterWarmup.length - used.length,
+    n_excluded_no_click: afterWarmup.length - used.length,
+    n_timeout_included: used.filter((t) => t.timeout).length, // 제외 안 함, 참고용
     n_used: n,
     sigma_px: sigmaPx,
     gaps_px: { '0': 0, '1sigma': sigmaPx, '3sigma': sigmaPx * 3 },
@@ -660,7 +666,10 @@ function aggregatePhase0(exportedDatasets) {
 
   const { a, b } = fitLogisticRegression(xs, ys);
 
-  const targets = [0.8, 0.85, 0.9];
+  // 명세서 밴드는 75~90%지만 목표를 80/85/90%로 잡으면 90%에 해당하는 크기가
+  // 후보 최대치(32px)를 넘어 외삽된다(실측: 32px에서도 성공률 83%가 한계).
+  // 75/80/85%는 밴드 안이면서 산출 크기가 전부 관측 범위에 들어온다.
+  const targets = [0.75, 0.8, 0.85];
   const rawPredicted = targets.map((p) => invertLogisticForSize(a, b, p));
 
   let adjusted = [Math.round(rawPredicted[0])];
@@ -668,6 +677,13 @@ function aggregatePhase0(exportedDatasets) {
   adjusted.push(Math.max(Math.round(rawPredicted[2]), adjusted[1] + MIN_GRID_GAP_PX));
 
   const fitValid = Number.isFinite(a) && Number.isFinite(b) && b > 0 && adjusted.every((v) => Number.isFinite(v) && v > 0);
+
+  // 산출 크기가 실제로 시험해본 범위를 벗어나면 회귀선만 믿고 외삽하는 것이므로
+  // 조용히 넘어가지 않고 기록·표시한다. (관측 최대 크기의 성공률이 목표에 못 미치면 발생)
+  const testedSizes = perSize.map((p) => p.size_px);
+  const minTested = Math.min(...testedSizes);
+  const maxTested = Math.max(...testedSizes);
+  const extrapolated = adjusted.filter((s) => s < minTested || s > maxTested);
 
   return {
     generated_at: new Date().toISOString(),
@@ -678,7 +694,10 @@ function aggregatePhase0(exportedDatasets) {
     predicted_sizes_px_raw: rawPredicted,
     selected_sizes_px: adjusted,
     min_gap_adjustment_applied: adjusted.some((v, i) => Math.round(rawPredicted[i]) !== v),
+    tested_size_range_px: [minTested, maxTested],
+    extrapolated_sizes_px: extrapolated,
     source_participant_ids: exportedDatasets.map((d) => d.participant_id),
+    n_source_participants: exportedDatasets.length,
   };
 }
 
@@ -778,7 +797,7 @@ function showDoneScreen() {
     const result = computeSigmaAndGaps(App.trials, App.participantId);
     App._lastSigmaResult = result;
     document.getElementById('sigmaSummary').innerHTML = `
-      <p>sigma_px = ${result.sigma_px.toFixed(3)} (n_used=${result.n_used}/${result.n_trials_total}, 워밍업 제외 ${result.n_excluded_warmup}, timeout 제외 ${result.n_excluded_timeout})</p>
+      <p>sigma_px = ${result.sigma_px.toFixed(3)} (n_used=${result.n_used}/${result.n_trials_total}, 워밍업 제외 ${result.n_excluded_warmup}, 무응답 제외 ${result.n_excluded_no_click}, timeout ${result.n_timeout_included}건은 포함)</p>
       <p>gaps_px: 0 / ${result.gaps_px['1sigma'].toFixed(1)} / ${result.gaps_px['3sigma'].toFixed(1)}</p>
     `;
   } else {
@@ -908,9 +927,22 @@ document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('aggregateFit').textContent =
         `로지스틱 회귀: a=${result.logistic_fit.intercept.toFixed(3)}, b=${result.logistic_fit.slope_on_ln_size.toFixed(3)}` +
         (result.logistic_fit.valid ? '' : ' (경고: 적합 불안정 — 원 데이터 확인 필요)');
-      document.getElementById('aggregateSelected').textContent =
-        `선택된 크기 3종: ${result.selected_sizes_px.join(', ')}px` +
-        (result.min_gap_adjustment_applied ? ' (최소 4px 간격 보정 적용됨)' : '');
+      const warnings = [];
+      if (result.extrapolated_sizes_px.length > 0) {
+        warnings.push(
+          `${result.extrapolated_sizes_px.join(', ')}px는 실제로 시험한 범위` +
+          `(${result.tested_size_range_px[0]}~${result.tested_size_range_px[1]}px) 밖입니다 — ` +
+          `회귀선 외삽이므로 후보 크기를 넓혀 0단계를 다시 돌리는 것을 권합니다.`
+        );
+      }
+      if (result.n_source_participants < 2) {
+        warnings.push('참가자가 1명뿐입니다 — 명세서 3.2절은 2~3명을 요구합니다.');
+      }
+
+      document.getElementById('aggregateSelected').innerHTML =
+        `선택된 크기 3종: <b>${result.selected_sizes_px.join(', ')}px</b>` +
+        (result.min_gap_adjustment_applied ? ' (최소 4px 간격 보정 적용됨)' : '') +
+        warnings.map((w) => `<br><span style="color:#b91c1c">경고: ${w}</span>`).join('');
 
       document.getElementById('aggregateResult').classList.remove('hidden');
     } catch (e) {

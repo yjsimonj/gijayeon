@@ -4,7 +4,10 @@
 Python으로 재구현한 것으로, 웹앱이 그 자리에서 내려준 gap config가 맞게 계산됐는지
 오프라인으로 재현·대조하는 용도다 (README 참고).
 
-필터: trial_index 기준 앞 20회(워밍업) 제외, timeout==true 시행 제외.
+필터: trial_index 기준 앞 20회(워밍업) 제외, 클릭이 없는 시행(무응답) 제외.
+      timeout==true 시행은 **제외하지 않는다** — 명세서 4.3절("시간 초과 시행은 별도
+      플래그를 남기되 제외하지 않음")과 일치. 실측에서 timeout이 56%에 달해, 제외하면
+      표본이 절반 이하로 줄고 느린(신중한) 시행만 빠져 sigma가 부풀려진다(4.24 → 4.59px).
 공식: 남은 시행의 (클릭 - 버튼중심) 유클리드 거리(px, 정규화 안 함)의 표본표준편차 = sigma_px.
 
 사용법:
@@ -48,15 +51,13 @@ def compute_sigma(data: dict) -> dict:
     after_warmup = trials[WARMUP_TRIALS:]
     n_excluded_warmup = n_total - len(after_warmup)
 
-    used = [t for t in after_warmup if not t.get("timeout")]
-    n_excluded_timeout = len(after_warmup) - len(used)
+    used = [t for t in after_warmup if t.get("click") is not None]
+    n_excluded_no_click = len(after_warmup) - len(used)
+    n_timeout_included = sum(1 for t in used if t.get("timeout"))
 
     distances = []
     for t in used:
-        click = t.get("click")
-        if click is None:
-            # timeout==false인데 click이 없는 것은 스키마 위반 — 조용히 넘기지 않고 알린다.
-            raise ValueError(f"trial_index={t['trial_index']}: timeout=false인데 click이 없습니다")
+        click = t["click"]
         center = (t["button"]["center_x"], t["button"]["center_y"])
         distances.append(error_distance((click["x"], click["y"]), center))
 
@@ -73,7 +74,8 @@ def compute_sigma(data: dict) -> dict:
         "computed_at": datetime.now(timezone.utc).isoformat(),
         "n_trials_total": n_total,
         "n_excluded_warmup": n_excluded_warmup,
-        "n_excluded_timeout": n_excluded_timeout,
+        "n_excluded_no_click": n_excluded_no_click,
+        "n_timeout_included": n_timeout_included,
         "n_used": len(distances),
         "sigma_px": sigma_px,
         "gaps_px": {"0": 0, "1sigma": sigma_px, "3sigma": 3 * sigma_px},
