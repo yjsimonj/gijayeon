@@ -34,7 +34,7 @@ const TRIAL_COUNTS = DEV_MODE
 const REST_BREAK_EVERY_N_TRIALS = DEV_MODE ? 5 : 50;
 const REST_BREAK_DURATION_MS = DEV_MODE ? 3000 : 30000;
 
-const TIME_SOFT_LIMIT_MS = 1;   // 초과 시 timeout=true 로 표시만, 시행은 안 끝남 (sudo 지시로 500→1 변경)
+const TIME_SOFT_LIMIT_MS = 1000;   // 초과 시 timeout=true 로 표시만, 시행은 안 끝남 (명세서 원안 500 → 1000으로 변경)
 const RESPONSE_HARD_CAP_MS = 3000; // 이 시점까지도 무응답이면 click:null 로 강제 종료
 const INTER_TRIAL_BLANK_MS = 200;
 const DRAG_DISTANCE_THRESHOLD_PX = 50; // mousedown~mouseup 거리 이 값 넘으면 드래그로 간주(폐기)
@@ -386,7 +386,7 @@ function runTrial(spec, trialIndex, phase) {
     stage.addEventListener('contextmenu', onContextMenu);
     rafHandle = requestAnimationFrame(sampleLoop);
 
-    // ---- 시간압박 표시줄: 500ms 소프트 제한을 실제로 "느끼게" 함 (계획서 3.3절
+    // ---- 시간압박 표시줄: 소프트 제한을 실제로 "느끼게" 함 (계획서 3.3절
     // "시간 제한을 두는 이유" — 안 보이면 사용자가 여유롭게 미세조정해버려 무의미) ----
     const timeBarFill = document.getElementById('timeBarFill');
     function resetTimeBar() {
