@@ -182,35 +182,69 @@ function generatePhase3Specs(selectedSizes, gapsPx) {
   return specs;
 }
 
-// 목표(3단계는 격자 바깥쪽 칸까지)가 화면 밖이나 상단바 밑으로 들어가지 않으려면
-// 화면 중앙에서 최소 이만큼 여유가 필요하다. 고해상도 디스플레이(Windows 배율 등으로
-// devicePixelRatio가 높은 경우) CSS 픽셀 기준 뷰포트가 물리 해상도보다 작아서, 큰
-// 화면에서도 600px 이동이 화면 밖/상단바 밑으로 나갈 수 있다 — 조용히 잘못된 데이터를
-// 만드는 대신 시작 전에 막는다.
-const STATUSBAR_CLEARANCE_PX = 50;
+/* ---------------------- 3-1. 시행 배치(홈·목표 위치) ---------------------- */
 
-function requiredHalfExtentPx(phase) {
-  const maxDistance = Math.max(...DISTANCES_PX);
-  const sizes = (App.buttonSizesConfig && App.buttonSizesConfig.selected_sizes_px) || CANDIDATE_SIZES_PX;
-  const maxSize = Math.max(...sizes);
-  let extent = maxDistance + maxSize / 2;
+// 홈을 화면 정중앙에 고정하면 세로 방향 600px 시행이 화면 밖으로 나간다
+// (세로 900px 화면에서 중앙 450 + 600 = 1050 > 900). 1920x1080에서도 마찬가지로
+// 불가능하다. 그래서 홈을 매 시행 옮겨 목표가 화면 안에 들어오게 하되,
+// 가능한 한 홈–목표 쌍의 중점이 화면 중앙에 오도록 배치한다.
+// 거리 300/600·8방향 균등배분은 그대로 유지된다.
+const HOME_BUTTON_SIZE_PX = 24;
+const EDGE_PADDING_PX = 8;
+const STATUSBAR_CLEARANCE_PX = 50; // 상단바에 가려지지 않도록 확보하는 위쪽 여유
 
-  if (phase === 3 && App.gapConfig) {
-    const maxGap = Math.max(...Object.values(App.gapConfig.gaps_px));
-    extent += maxSize + maxGap; // 목표 칸 기준 격자 바깥쪽 한 칸 더
-  }
-
-  return extent + STATUSBAR_CLEARANCE_PX;
+// 목표를 중심으로 화면을 차지하는 반경. 3단계는 격자 바깥쪽 한 칸까지 포함한다.
+function targetExtentPx(spec, phase) {
+  const r = spec.size / 2;
+  if (phase !== 3) return r;
+  const spacing = spec.size + spec.gap; // 인접 버튼 중심 간 거리 = 2r + gap
+  return r + spacing;
 }
 
-function checkViewportLargeEnough(phase) {
-  const half = requiredHalfExtentPx(phase);
-  if (window.innerWidth / 2 >= half && window.innerHeight / 2 >= half) return true;
+/**
+ * 한 시행의 홈·목표 좌표를 뷰포트 기준으로 계산한다.
+ * 배치가 불가능하면(화면이 너무 작아 어떤 위치로도 둘 다 담을 수 없음) null.
+ */
+function computeTrialLayout(spec, phase, viewportW, viewportH) {
+  const { dx, dy } = directionToUnitVector(spec.direction);
+  const vx = dx * spec.distance;
+  const vy = dy * spec.distance;
 
+  const homeR = HOME_BUTTON_SIZE_PX / 2;
+  const te = targetExtentPx(spec, phase);
+
+  // 홈이 놓일 수 있는 범위 = (홈 자신이 화면 안) ∩ (홈 + 이동벡터인 목표도 화면 안)
+  const hxMin = Math.max(homeR, te - vx) + EDGE_PADDING_PX;
+  const hxMax = viewportW - Math.max(homeR, te + vx) - EDGE_PADDING_PX;
+  const hyMin = STATUSBAR_CLEARANCE_PX + Math.max(homeR, te - vy);
+  const hyMax = viewportH - Math.max(homeR, te + vy) - EDGE_PADDING_PX;
+
+  if (hxMin > hxMax || hyMin > hyMax) return null;
+
+  // 기본값: 홈–목표 쌍의 중점이 화면(상단바 아래 영역) 중앙에 오도록
+  const desiredHx = viewportW / 2 - vx / 2;
+  const desiredHy = (STATUSBAR_CLEARANCE_PX + viewportH) / 2 - vy / 2;
+
+  const homeX = Math.min(Math.max(desiredHx, hxMin), hxMax);
+  const homeY = Math.min(Math.max(desiredHy, hyMin), hyMax);
+
+  return { homeX, homeY, targetX: homeX + vx, targetY: homeY + vy };
+}
+
+// 시작 전에 모든 시행이 실제로 표시 가능한지 확인한다. 확인 없이 진행하면
+// 화면 밖 목표를 "클릭 실패"로 조용히 기록해 데이터가 오염된다.
+function checkAllTrialsFit(specs, phase) {
+  const infeasible = specs.filter(
+    (s) => computeTrialLayout(s, phase, window.innerWidth, window.innerHeight) === null
+  );
+  if (infeasible.length === 0) return true;
+
+  const worst = infeasible.reduce((a, b) => (b.distance > a.distance ? b : a));
   alert(
-    `화면이 너무 작아 이 단계를 정상적으로 표시할 수 없습니다.\n` +
-    `가로·세로 각각 최소 ${Math.ceil(half * 2)}px 필요 (현재 뷰포트 ${window.innerWidth}x${window.innerHeight}).\n` +
-    `Windows 디스플레이 배율을 100%로 낮추거나 더 큰 화면에서 실행하세요.`
+    `화면이 너무 작아 ${infeasible.length}개 시행을 표시할 수 없습니다.\n` +
+    `(예: 이동거리 ${worst.distance}px, 버튼 ${worst.size}px)\n` +
+    `현재 뷰포트 ${window.innerWidth}x${window.innerHeight}.\n` +
+    `Windows 디스플레이 배율을 낮추거나 더 큰 화면에서 실행하세요.`
   );
   return false;
 }
@@ -227,13 +261,13 @@ function runTrial(spec, trialIndex, phase) {
     stage.innerHTML = '';
 
     // 모든 좌표(홈/목표/격자/기록값)는 클릭 이벤트(e.clientX/clientY)와 동일한
-    // 뷰포트 기준으로 계산한다. #stage가 상단바만큼 top 오프셋을 가지므로,
-    // 렌더링 시에만 stageRect.left/top을 빼서 stage 로컬 좌표로 변환한다
-    // (변환 안 하면 button.center_*가 stage 로컬 기준이 되어 클릭 좌표와
-    // 어긋나 실제로는 맞은 클릭도 전부 미스로 기록되는 버그가 생긴다).
+    // 뷰포트 기준으로 계산한다. 렌더링 시에만 stageRect.left/top을 빼서 stage
+    // 로컬 좌표로 변환한다 (변환 안 하면 button.center_*가 stage 로컬 기준이 되어
+    // 클릭 좌표와 어긋나 실제로는 맞은 클릭도 전부 미스로 기록되는 버그가 생긴다).
     const stageRect = stage.getBoundingClientRect();
-    const homeX = stageRect.left + stageRect.width / 2;
-    const homeY = stageRect.top + stageRect.height / 2;
+    const layout = computeTrialLayout(spec, phase, window.innerWidth, window.innerHeight);
+    const homeX = layout.homeX;
+    const homeY = layout.homeY;
 
     let subPhase = 'await-home'; // 'await-home' | 'await-target-click'
     let trajectory = [];
@@ -257,21 +291,15 @@ function runTrial(spec, trialIndex, phase) {
 
     const homeEl = document.createElement('div');
     homeEl.className = 'stim home';
-    circleStyle(homeEl, homeX, homeY, 24);
+    circleStyle(homeEl, homeX, homeY, HOME_BUTTON_SIZE_PX);
     stage.appendChild(homeEl);
 
     let targetAbsX, targetAbsY;
     let gridCells = []; // phase3: [{el, cx, cy, isTarget}]
 
-    function computeTargetPosition() {
-      const { dx, dy } = directionToUnitVector(spec.direction);
-      return { x: homeX + dx * spec.distance, y: homeY + dy * spec.distance };
-    }
-
     function renderTarget() {
-      const pos = computeTargetPosition();
-      targetAbsX = pos.x;
-      targetAbsY = pos.y;
+      targetAbsX = layout.targetX;
+      targetAbsY = layout.targetY;
 
       if (phase !== 3) {
         const el = document.createElement('div');
@@ -761,13 +789,13 @@ async function requestFullscreenAndRun() {
     return;
   }
 
-  if (!checkViewportLargeEnough(App.phase)) {
+  const specs = buildSpecsForPhase(App.phase);
+  if (!checkAllTrialsFit(specs, App.phase)) {
     await document.exitFullscreen().catch(() => {});
     return;
   }
 
   captureScreenInfo();
-  const specs = buildSpecsForPhase(App.phase);
   showScreen('screen-run');
   await runBlock(specs, App.phase);
 }
