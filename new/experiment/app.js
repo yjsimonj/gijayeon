@@ -34,7 +34,7 @@ const TRIAL_COUNTS = DEV_MODE
 const REST_BREAK_EVERY_N_TRIALS = DEV_MODE ? 5 : 50;
 const REST_BREAK_DURATION_MS = DEV_MODE ? 3000 : 30000;
 
-const TIME_SOFT_LIMIT_MS = 1000;   // 초과 시 timeout=true 로 표시만, 시행은 안 끝남 (명세서 원안 500 → 1000으로 변경)
+const TIME_SOFT_LIMIT_MS = 750;   // 초과 시 timeout=true 로 표시만, 시행은 안 끝남 (명세서 원안 500 → 750으로 변경)
 const RESPONSE_HARD_CAP_MS = 3000; // 이 시점까지도 무응답이면 click:null 로 강제 종료
 const INTER_TRIAL_BLANK_MS = 200;
 const DRAG_DISTANCE_THRESHOLD_PX = 50; // mousedown~mouseup 거리 이 값 넘으면 드래그로 간주(폐기)
@@ -486,7 +486,10 @@ function runTrial(spec, trialIndex, phase) {
         target_onset_time: targetOnsetTime,
         home_click_time: homeClickTime,
         trajectory,
-        timeout: softTimeoutFired,
+        // 클릭이 있으면 클릭 시각(mousedown) 기준으로 판정한다. softTimeoutFired는
+        // mouseup 시점에 읽히므로, 버튼을 오래 누르고 있으면 제한 안에 누른 클릭도
+        // timeout으로 잘못 기록된다(실측: mousedown 972ms인데 timeout=true).
+        timeout: click ? click.time - targetOnsetTime > TIME_SOFT_LIMIT_MS : softTimeoutFired,
         insufficient_trajectory_flag: insufficientTrajectory,
         gap_sigma_px: phase === 3 ? App.gapConfig.sigma_px : null,
         screen: App.screenInfo,
