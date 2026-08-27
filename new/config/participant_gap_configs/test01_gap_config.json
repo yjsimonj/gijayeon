@@ -1,0 +1,16 @@
+{
+  "participant_id": "test01",
+  "sigma_source_phase": 1,
+  "computed_at": "2026-08-27T06:05:38.312Z",
+  "n_trials_total": 400,
+  "n_excluded_warmup": 20,
+  "n_excluded_no_click": 1,
+  "n_timeout_included": 74,
+  "n_used": 379,
+  "sigma_px": 5.534856357600356,
+  "gaps_px": {
+    "0": 0,
+    "1sigma": 5.534856357600356,
+    "3sigma": 16.60456907280107
+  }
+}

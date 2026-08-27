@@ -8,12 +8,19 @@
 new/
 ├─ experiment/        웹앱 (index.html, style.css, app.js)
 ├─ analysis/
-│  ├─ error_decomposition.py   방향 추정 + e∥/e⊥ 분해 (향후 특징 추출에서도 재사용)
-│  └─ compute_sigma.py         σ/gap config 오프라인 재현·검증용
+│  ├─ error_decomposition.py   방향 추정 + e∥/e⊥ 분해
+│  ├─ feature_extraction.py    궤적 → 특징 벡터 (+ 멈칫 분해)
+│  ├─ compute_sigma.py         σ/gap config 오프라인 재현·검증용
+│  ├─ train_model.py           릿지 회귀 학습 + 교차검증
+│  ├─ model_io.py              모델 로드 · 보정 적용 · 스냅 판정
+│  ├─ evaluate_phase2.py       2단계 평가 (McNemar 등)
+│  ├─ evaluate_phase3.py       3단계 A/B/C/D 재평가 (Cochran's Q 등)
+│  └─ plots.py                 그림 4종
 ├─ config/
 │  ├─ phase0_button_sizes.json      0단계 결과 집계로 생성 (최초엔 없음)
 │  └─ participant_gap_configs/      1단계 완료 시 웹앱이 내려주는 gap config 저장 위치
-└─ data/               브라우저가 내려받은 원본 JSON을 옮겨두는 곳
+├─ data/               브라우저가 내려받은 원본 JSON을 옮겨두는 곳
+└─ figures/            plots.py 출력 (자동 생성)
 ```
 
 ## 웹앱 실행
@@ -48,14 +55,56 @@ python -m http.server 8000
 
 한 참가자에 대해 3 → 5 → 6 순서(1·2·3단계)를 반복하는 것이 본 실험의 단위다. 0단계(1~2번)는 전체 연구에서 한 번만 수행한다.
 
-## 분석 모듈
+## 분석 파이프라인
 
-- **`error_decomposition.py`**: 궤적 → 접근 방향(150ms 규칙, 3px 미만 시 250ms 폴백) → e∥/e⊥ 분해 → 버튼 반폭 정규화. `python error_decomposition.py`로 자체 점검(합성 데이터로 부호 규약 검증) 실행 가능. 릿지 회귀 등 이후 특징 추출 단계에서 그대로 재사용할 모듈.
-- **`compute_sigma.py`**: 위 4번 참고. σ는 워밍업 20회와 무응답 시행만 빼고 계산하며, **timeout 시행은 포함**한다(명세서 4.3절). 실측에서 timeout이 56%에 달해, 제외하면 표본이 절반 이하로 줄고 느린 시행만 빠져 σ가 부풀려진다.
+의존 라이브러리: `pip install numpy scipy scikit-learn statsmodels matplotlib`
 
-## 아직 구현하지 않은 것
+데이터가 모인 뒤 이 순서로 돌린다 (경로는 `new/analysis/`에서 실행 기준):
 
-릿지 회귀 학습, A/B/C/D 오프라인 재평가, 통계 검정(McNemar/Cochran's Q/대응표본 t-검정), 시각화 — 데이터가 축적된 뒤 별도로 진행.
+```bash
+# 1단계 로그로 모델 학습 (교차검증 + 7.3절 3단 베이스라인 비교까지 출력)
+python train_model.py ../data/phase1_test01_*.json --out ../config/test01_model.json
+
+# 2단계 평가 — 새 데이터에 모델 적용, McNemar + 대응표본 검정
+python evaluate_phase2.py ../data/phase2_test01_*.json \
+    --model ../config/test01_model.json \
+    --phase1 ../data/phase1_test01_*.json \
+    --out ../data/phase2_result_test01.json
+
+# 3단계 평가 — A/B/C/D 오프라인 재평가, 간격별 Cochran's Q + 사후 McNemar
+python evaluate_phase3.py ../data/phase3_test01_*.json \
+    --model ../config/test01_model.json \
+    --out ../data/phase3_result_test01.json
+
+# 그림
+python plots.py --phase1 ../data/phase1_test01_*.json \
+    --phase3-result ../data/phase3_result_test01.json --outdir ../figures
+```
+
+### 모듈별 역할
+
+| 파일 | 역할 |
+|---|---|
+| `error_decomposition.py` | 접근 방향 추정(150ms, 3px 미만 시 250ms 폴백) → e∥/e⊥ 분해 → 버튼 반폭 정규화. `python error_decomposition.py`로 부호 규약 자체 점검 실행 |
+| `feature_extraction.py` | 궤적 → 명세서 4.1절 6특징. 멈칫(pause) 분해도 함께 계산. `--` 인자로 단독 실행하면 특징 분포를 출력 |
+| `compute_sigma.py` | σ / gap config 산출 (위 4번). 웹앱 계산의 오프라인 재현·검증용 |
+| `train_model.py` | 릿지 회귀 + 5-fold CV(20회 반복). e∥/e⊥ 와 화면좌표 Δx/Δy **두 대상 모두** 학습해 비교. 7.3절 3단 베이스라인(보정없음/상수/릿지) 출력 |
+| `model_io.py` | 저장된 모델 로드·보정 적용, 최근접 버튼 스냅, 원형 포함 판정 |
+| `evaluate_phase2.py` | 1단계 학습 → 2단계 적용. McNemar(성공률) + 대응표본 t 또는 Wilcoxon(오차거리) |
+| `evaluate_phase3.py` | A/B/C/D 재평가. 간격별 Cochran's Q → 사후 McNemar + Bonferroni |
+| `plots.py` | 간격별 조건 비교, 오차 산점도(부호 검증용), 방향별 편향 벡터, 멈칫 구조 |
+
+### 구현 시 주의한 점 (실데이터에서 확인된 사항)
+
+- **σ 계산**: 워밍업 20회와 무응답 시행만 제외하고 **timeout 시행은 포함**한다(명세서 4.3절). 750ms 제한에서 timeout이 20~56%에 달해, 제외하면 표본이 크게 줄고 느린(신중한) 시행만 빠져 σ가 부풀려진다.
+- **예측 대상을 두 가지로 학습한다**: e∥/e⊥ 로 회전하면 화면 좌표계의 고정 편향이 8방향 평균에서 상쇄된다. 1단계 375시행에서 Δy = −1.28px (t=−3.28)의 편향이 회전 후에는 사라졌다. 명세서 2.1절은 그 반대를 전제했으므로, 두 대상을 모두 적합해 비교한다.
+- **멈칫 특징은 기본 비활성**: 추가하면 e⊥ 의 교차검증 R²가 −1.7% → −3.2%로 악화됐다(과적합). `--pause-features` 로만 켜진다.
+- **게이팅(4.5절) 주의**: 예측 보정량이 1~2px 수준인데 임계값이 반폭의 0.5(=5~7.5px)라, 그대로 적용하면 거의 모든 보정이 무효화된다. 결과 표에서 게이팅 적용/미적용을 함께 보고한다.
+- **추론 제약(1.3절)을 코드로 강제**: `feature_extraction.py`의 특징은 궤적·클릭점·버튼 반폭만 쓴다. 목표 버튼 중심 좌표는 라벨 계산에만 사용한다. "목표 대비 오버슛" 같은 지표는 추론 시 계산할 수 없어 특징에서 제외했다.
+
+## 분석 시 권장 절차
+
+1단계 400회처럼 표본이 제한된 상태에서 특징을 여러 개 시험하면 우연히 맞는 것을 고르게 된다. 앞부분(예: 150회)으로만 탐색해 가설을 정하고, 남겨둔 부분으로 한 번만 검증할 것. 실제로 1단계 데이터에서 탐색 단계에 유의했던 가설 3개가 검증셋에서 전부 재현되지 않았다.
 
 ## 알려진 제약
 

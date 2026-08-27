@@ -1,7 +1,3 @@
 __pycache__/
 *.pyc
-
-# 실험 실행으로 수집된 참가자 데이터 — 코드가 아니라 실험 산출물이므로 추적하지 않는다.
-new/data/*.json
-new/config/*.json
-new/config/participant_gap_configs/*.json
+new/figures/

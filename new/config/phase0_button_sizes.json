@@ -1,0 +1,61 @@
+{
+  "generated_at": "2026-08-27T05:33:23.326Z",
+  "trials_per_size": 30,
+  "per_size": [
+    {
+      "size_px": 6,
+      "n_trials": 30,
+      "success_rate": 0.23333333333333334
+    },
+    {
+      "size_px": 10,
+      "n_trials": 30,
+      "success_rate": 0.5
+    },
+    {
+      "size_px": 16,
+      "n_trials": 30,
+      "success_rate": 0.7
+    },
+    {
+      "size_px": 24,
+      "n_trials": 30,
+      "success_rate": 0.8
+    },
+    {
+      "size_px": 32,
+      "n_trials": 30,
+      "success_rate": 0.8333333333333334
+    }
+  ],
+  "logistic_fit": {
+    "intercept": -4.054444863267595,
+    "slope_on_ln_size": 1.7076302148597786,
+    "valid": true
+  },
+  "target_success_rates": [
+    0.75,
+    0.8,
+    0.85
+  ],
+  "predicted_sizes_px_raw": [
+    20.443514937232223,
+    24.19471726994351,
+    29.669070644545158
+  ],
+  "selected_sizes_px": [
+    20,
+    24,
+    30
+  ],
+  "min_gap_adjustment_applied": false,
+  "tested_size_range_px": [
+    6,
+    32
+  ],
+  "extrapolated_sizes_px": [],
+  "source_participant_ids": [
+    "test01"
+  ],
+  "n_source_participants": 1
+}
