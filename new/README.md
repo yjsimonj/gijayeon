@@ -22,8 +22,9 @@ new/
 ├─ config/
 │  ├─ phase0_button_sizes.json      0단계 결과 집계로 생성 (최초엔 없음)
 │  └─ participant_gap_configs/      1단계 완료 시 웹앱이 내려주는 gap config 저장 위치
-├─ data/               브라우저가 내려받은 원본 JSON을 옮겨두는 곳
-└─ figures/            plots.py 출력 (자동 생성)
+├─ data/               원본 JSON + 분석 결과 JSON
+├─ figures/            plots.py 출력
+└─ results/            결과 보고서
 ```
 
 ## 웹앱 실행
