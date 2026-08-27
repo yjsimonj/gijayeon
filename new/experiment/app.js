@@ -38,7 +38,9 @@ const TIME_SOFT_LIMIT_MS = 750;   // 초과 시 timeout=true 로 표시만, 시�
 const RESPONSE_HARD_CAP_MS = 3000; // 이 시점까지도 무응답이면 click:null 로 강제 종료
 const INTER_TRIAL_BLANK_MS = 200;
 const DRAG_DISTANCE_THRESHOLD_PX = 50; // mousedown~mouseup 거리 이 값 넘으면 드래그로 간주(폐기)
-const MIN_PRECLICK_TRAJECTORY_MS = 200;
+// 방향 추정 확대 창(analysis/error_decomposition.py의 FALLBACK_WINDOW_MS=250)과 같은 값.
+// 이보다 짧으면 폴백 계산에 쓸 참조점이 없으므로 해당 시행에 플래그를 남긴다.
+const MIN_PRECLICK_TRAJECTORY_MS = 250;
 const MIN_GRID_GAP_PX = 4; // 0단계 자동 선택 시 세 크기 간 최소 간격
 
 const WARMUP_TRIALS_TO_EXCLUDE = 20; // σ 계산 시 앞 N회 제외 (분석용, 실행 로직과 무관)

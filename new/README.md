@@ -46,7 +46,7 @@ python -m http.server 8000
 
 ## 분석 모듈
 
-- **`error_decomposition.py`**: 궤적 → 접근 방향(80ms 규칙, 3px 미만 시 150ms 폴백) → e∥/e⊥ 분해 → 버튼 반폭 정규화. `python error_decomposition.py`로 자체 점검(합성 데이터로 부호 규약 검증) 실행 가능. 릿지 회귀 등 이후 특징 추출 단계에서 그대로 재사용할 모듈.
+- **`error_decomposition.py`**: 궤적 → 접근 방향(150ms 규칙, 3px 미만 시 250ms 폴백) → e∥/e⊥ 분해 → 버튼 반폭 정규화. `python error_decomposition.py`로 자체 점검(합성 데이터로 부호 규약 검증) 실행 가능. 릿지 회귀 등 이후 특징 추출 단계에서 그대로 재사용할 모듈.
 - **`compute_sigma.py`**: 위 4번 참고.
 
 ## 아직 구현하지 않은 것

@@ -1,6 +1,6 @@
 """오차 계산 모듈 — 마우스보정_실험계획서.md 2.2~2.3절 구현.
 
-진행 방향 추정(80ms 규칙 → 3px 미만이면 150ms로 확대 재계산 → 그래도 미만이면 결측),
+진행 방향 추정(기본 창 → 3px 미만이면 확대 창으로 재계산 → 그래도 미만이면 결측),
 진행 방향 기준 오차 분해(e_parallel, e_perp), 버튼 반폭 정규화, 원클릭 오차 거리를 제공한다.
 
 부호 규약 (명세서 2.3절):
@@ -28,11 +28,27 @@ class TrajectoryPoint(TypedDict):
     t: float  # ms, 단조 증가
 
 
-DirectionFlag = Literal["ok_80ms", "ok_150ms_expanded", "insufficient_displacement"]
+# 방향 추정 결과 플래그. 창 길이가 이름에 들어가므로 아래 상수에서 생성해
+# 값과 이름이 어긋나지 않게 한다.
+#   "ok_150ms"            기본 창으로 추정 성공
+#   "ok_250ms_expanded"   기본 창 변위 부족 → 확대 창으로 재계산 성공
+#   "insufficient_displacement"  확대 창으로도 부족 → 방향 결측
+DirectionFlag = str
 
 MIN_DISPLACEMENT_PX = 3.0
-PRIMARY_WINDOW_MS = 80.0
-FALLBACK_WINDOW_MS = 150.0
+
+# 명세서 원안은 기본 80ms / 폴백 150ms였다. 그러나 실측 결과 사람은 커서를 목표에
+# 세운 뒤에 버튼을 누르므로, 클릭 직전 80~100ms가 사실상 정지 구간이다
+# (예비 15시행: 80ms 변위 중앙값 1.41px, 73%가 3px 미만 → 폴백이 기본 경로가 됨).
+# 명세서 2.2절이 "마지막 한 샘플(16ms)은 감속 구간"이라 지적한 문제가 16ms가 아니라
+# 80~100ms까지 이어지는 것이다. 그래서 기본 창을 150ms로 올리고 폴백을 250ms로 둔다.
+# (실측 변위 중앙값: 80ms 1.41px / 120ms 9.22px / 150ms 16.28px / 250ms 37.22px)
+PRIMARY_WINDOW_MS = 150.0
+FALLBACK_WINDOW_MS = 250.0
+
+PRIMARY_FLAG = f"ok_{PRIMARY_WINDOW_MS:.0f}ms"
+FALLBACK_FLAG = f"ok_{FALLBACK_WINDOW_MS:.0f}ms_expanded"
+INSUFFICIENT_FLAG = "insufficient_displacement"
 
 
 def _find_reference_point(
@@ -40,7 +56,7 @@ def _find_reference_point(
 ) -> Optional[TrajectoryPoint]:
     """click_time으로부터 window_ms 이상 이전인 샘플 중 가장 최근(=click_time에 가장 가까운) 것.
 
-    "P_(click-80ms)는 클릭 시각으로부터 80ms 이상 이전인 궤적 샘플 중 가장 최근의 것"
+    "P_(click-Xms)는 클릭 시각으로부터 X ms 이상 이전인 궤적 샘플 중 가장 최근의 것"
     (2.2절)을 그대로 구현: t <= click_time - window_ms 인 샘플 중 t가 최대인 것.
     """
     candidates = [p for p in trajectory if p["t"] <= click_time - window_ms]
@@ -55,11 +71,11 @@ def estimate_approach_direction(
     """클릭 직전 접근 방향 theta(라디안)를 추정한다.
 
     반환: (theta | None, flag)
-      - flag == "insufficient_displacement" 이면 theta는 None (방향 의존 특징 결측 처리 대상).
+      - flag == INSUFFICIENT_FLAG 이면 theta는 None (방향 의존 특징 결측 처리 대상).
     """
     for window_ms, flag in (
-        (PRIMARY_WINDOW_MS, "ok_80ms"),
-        (FALLBACK_WINDOW_MS, "ok_150ms_expanded"),
+        (PRIMARY_WINDOW_MS, PRIMARY_FLAG),
+        (FALLBACK_WINDOW_MS, FALLBACK_FLAG),
     ):
         ref = _find_reference_point(trajectory, click_time, window_ms)
         if ref is None:
@@ -68,9 +84,9 @@ def estimate_approach_direction(
         dy = click_xy[1] - ref["y"]
         displacement = math.hypot(dx, dy)
         if displacement >= MIN_DISPLACEMENT_PX:
-            return math.atan2(dy, dx), flag  # type: ignore[return-value]
+            return math.atan2(dy, dx), flag
 
-    return None, "insufficient_displacement"
+    return None, INSUFFICIENT_FLAG
 
 
 def decompose_error(
@@ -140,17 +156,21 @@ if __name__ == "__main__":
     # 자체 점검: 실데이터 없이도 부호 규약이 맞는지 합성 데이터로 확인한다.
     # (명세서 2.3절: "분석 전 시각화로 한 번 검증할 것" — 여기서는 수치로 사전 검증.)
 
-    # 1) 방향 추정: click_time=1000ms, click 직전 80ms(t=920)에 (0,0)에 있었고
-    #    클릭은 (100, 0) → 오른쪽으로 곧장 이동 → theta ~= 0
+    # 창 길이를 바꿔도 점검이 따라가도록, 합성 궤적을 상수에서 만든다.
+    CLICK_T = 1000.0
+    PRIMARY_REF_T = CLICK_T - PRIMARY_WINDOW_MS       # 기본 창의 참조점 시각
+    FALLBACK_REF_T = CLICK_T - FALLBACK_WINDOW_MS     # 확대 창의 참조점 시각
+
+    # 1) 방향 추정: 기본 창 참조점에 (0,0), 클릭은 (100,0) → 오른쪽으로 직진 → theta ~= 0
     traj = [
-        {"x": 0.0, "y": 0.0, "t": 900.0},
-        {"x": 0.0, "y": 0.0, "t": 920.0},
-        {"x": 50.0, "y": 0.0, "t": 960.0},
+        {"x": 0.0, "y": 0.0, "t": FALLBACK_REF_T},
+        {"x": 0.0, "y": 0.0, "t": PRIMARY_REF_T},
+        {"x": 50.0, "y": 0.0, "t": PRIMARY_REF_T + 40},
     ]
-    theta, flag = estimate_approach_direction(traj, click_time=1000.0, click_xy=(100.0, 0.0))
-    assert flag == "ok_80ms", flag
+    theta, flag = estimate_approach_direction(traj, click_time=CLICK_T, click_xy=(100.0, 0.0))
+    assert flag == PRIMARY_FLAG, flag
     assert abs(theta - 0.0) < 1e-9, theta
-    print(f"[OK] estimate_approach_direction 80ms: theta={theta:.4f} rad, flag={flag}")
+    print(f"[OK] estimate_approach_direction 기본 창: theta={theta:.4f} rad, flag={flag}")
 
     # 2) 오버슛: 진행 방향(오른쪽, theta=0) 그대로 목표 중심을 10px 지나쳐 클릭
     #    E = click - center = (10, 0) → e_parallel = +10 (오버슛), e_perp = 0
@@ -175,20 +195,23 @@ if __name__ == "__main__":
     assert abs(e_par_n - 1.0) < 1e-9, e_par_n
     print(f"[OK] normalize_error: e_parallel_norm={e_par_n:.3f} (기대 1.0, 버튼 경계)")
 
-    # 6) 변위 3px 미만 폴백: 80ms 구간 변위(0.5px)는 부족하지만 150ms 구간 변위(10px)는 충분
+    # 6) 폴백: 기본 창 변위(0.5px)는 부족하지만 확대 창 변위(10px)는 충분
+    #    → 실제 데이터에서 클릭 직전 정지 구간이 기본 창을 삼킬 때 일어나는 상황
     traj_small = [
-        {"x": 0.0, "y": 0.0, "t": 800.0},   # click-200ms: 150ms 규칙(t<=850)의 참조점
-        {"x": 9.0, "y": 0.0, "t": 900.0},   # click-100ms
-        {"x": 9.5, "y": 0.0, "t": 920.0},   # click-80ms: 80ms 규칙(t<=920)의 참조점
+        {"x": 0.0, "y": 0.0, "t": FALLBACK_REF_T},   # 확대 창의 참조점
+        {"x": 9.5, "y": 0.0, "t": PRIMARY_REF_T},    # 기본 창의 참조점 (여기서 클릭까지 0.5px)
     ]
-    theta, flag = estimate_approach_direction(traj_small, click_time=1000.0, click_xy=(10.0, 0.0))
-    assert flag == "ok_150ms_expanded", flag
-    print(f"[OK] 80ms 변위 부족(0.5px) 시 150ms 폴백: flag={flag}")
+    theta, flag = estimate_approach_direction(traj_small, click_time=CLICK_T, click_xy=(10.0, 0.0))
+    assert flag == FALLBACK_FLAG, flag
+    print(f"[OK] 기본 창 변위 부족(0.5px) 시 확대 창 폴백: flag={flag}")
 
-    # 7) 150ms로도 변위 3px 미만이면 결측
-    traj_stuck = [{"x": 0.0, "y": 0.0, "t": t} for t in range(700, 1000, 20)]
-    theta, flag = estimate_approach_direction(traj_stuck, click_time=1000.0, click_xy=(1.0, 0.0))
-    assert theta is None and flag == "insufficient_displacement", (theta, flag)
-    print(f"[OK] 150ms로도 변위 부족 시 결측 처리: theta={theta}, flag={flag}")
+    # 7) 확대 창으로도 변위 3px 미만이면 결측
+    traj_stuck = [
+        {"x": 0.0, "y": 0.0, "t": t}
+        for t in range(int(CLICK_T - FALLBACK_WINDOW_MS * 2), int(CLICK_T), 20)
+    ]
+    theta, flag = estimate_approach_direction(traj_stuck, click_time=CLICK_T, click_xy=(1.0, 0.0))
+    assert theta is None and flag == INSUFFICIENT_FLAG, (theta, flag)
+    print(f"[OK] 확대 창으로도 변위 부족 시 결측 처리: theta={theta}, flag={flag}")
 
     print("\nerror_decomposition.py 자체 점검 전부 통과.")
