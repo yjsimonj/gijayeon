@@ -1,0 +1,86 @@
+{
+  "participant_id": "test01",
+  "phase": 2,
+  "n_trials": 120,
+  "model": "..\\config\\test01_model.json",
+  "constant_offset": [
+    -0.08638960818103124,
+    -1.2830187582825596
+  ],
+  "summary": {
+    "보정 없음": {
+      "mean_error_px": 11.235745001158097,
+      "median_error_px": 10.440630126373268,
+      "success_rate": 0.65,
+      "mean_margin_px": 1.1642549988419026
+    },
+    "상수 보정": {
+      "mean_error_px": 11.235701052729961,
+      "median_error_px": 10.115388408124467,
+      "success_rate": 0.6333333333333333,
+      "mean_margin_px": 1.164298947270037
+    },
+    "AI 보정": {
+      "mean_error_px": 10.957419700692657,
+      "median_error_px": 9.944278967741727,
+      "success_rate": 0.6666666666666666,
+      "mean_margin_px": 1.4425802993073438
+    },
+    "AI 보정+게이팅": {
+      "mean_error_px": 11.235745001158097,
+      "median_error_px": 10.440630126373268,
+      "success_rate": 0.65,
+      "mean_margin_px": 1.1642549988419026
+    }
+  },
+  "tests": {
+    "상수 보정": {
+      "success": {
+        "rate_before": 0.65,
+        "rate_after": 0.6333333333333333,
+        "gained": 2,
+        "lost": 4,
+        "p": 0.6875
+      },
+      "error_distance": {
+        "n": 120,
+        "mean_before": 11.235745001158097,
+        "mean_after": 11.235701052729961,
+        "test": "Wilcoxon 부호순위",
+        "stat": 3583.0,
+        "p": 0.9020382843299045,
+        "cohens_d": -4.8886164615333056e-05
+      }
+    },
+    "AI 보정": {
+      "success": {
+        "rate_before": 0.65,
+        "rate_after": 0.6666666666666666,
+        "gained": 6,
+        "lost": 4,
+        "p": 0.75390625
+      },
+      "error_distance": {
+        "n": 120,
+        "mean_before": 11.235745001158097,
+        "mean_after": 10.957419700692657,
+        "test": "대응표본 t-검정",
+        "stat": -2.174105908326437,
+        "p": 0.031676779892995444,
+        "cohens_d": -0.19846780806594141
+      }
+    },
+    "AI 보정+게이팅": {
+      "success": {
+        "p": 1.0,
+        "gained": 0,
+        "lost": 0
+      },
+      "error_distance": {
+        "n": 120,
+        "test": "none",
+        "p": 1.0
+      }
+    }
+  }
+}
