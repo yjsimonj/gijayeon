@@ -1,0 +1,127 @@
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
+  background: #f4f5f7;
+  color: #1f2430;
+  user-select: none;
+}
+
+.screen {
+  display: none;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+}
+.screen.active { display: block; }
+
+.panel {
+  max-width: 640px;
+  margin: 40px auto;
+  padding: 24px 32px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+}
+
+h1 { font-size: 20px; margin-top: 0; }
+h2 { font-size: 16px; }
+
+.field { margin-bottom: 18px; }
+.field label { display: block; font-weight: 600; margin-bottom: 6px; }
+.radio-row label { display: block; font-weight: 400; margin: 4px 0; }
+input[type="text"] { width: 100%; padding: 8px; font-size: 14px; }
+.hint { font-size: 12px; color: #6b7280; margin-top: 4px; }
+
+button {
+  padding: 8px 16px;
+  font-size: 14px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+
+table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+table th, table td { border: 1px solid #d1d5db; padding: 6px 10px; text-align: right; font-size: 13px; }
+table th:first-child, table td:first-child { text-align: left; }
+
+.hidden { display: none !important; }
+
+/* ---- 진행 화면 ---- */
+#screen-run { position: relative; }
+
+#statusbar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 40px;
+  background: #1f2430;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 0 16px;
+  font-size: 13px;
+  z-index: 50;
+}
+#statusbar button { margin-left: auto; }
+
+/* 상단바·시간바는 stage 위에 얹히는 오버레이일 뿐, stage 좌표 공간을 줄이지 않는다.
+   (stage를 줄이면 "홈은 화면 정중앙" 요구사항이 깨지고, 위쪽 방향 목표가 상단바와
+   겹칠 위험이 커진다.) */
+#timeBar {
+  position: fixed;
+  top: 40px; left: 0; right: 0;
+  height: 5px;
+  background: #e5e7eb;
+  z-index: 40;
+  pointer-events: none; /* 혹시 목표가 이 얇은 띠와 겹쳐도 클릭이 통과하도록 */
+}
+#timeBarFill {
+  height: 100%;
+  width: 0%;
+  background: #2563eb;
+}
+#timeBarFill.overtime { background: #dc2626; }
+
+#stage {
+  position: fixed;
+  inset: 0;
+  background: #f4f5f7;
+}
+
+.stim {
+  position: absolute;
+  border-radius: 50%;
+  border: 2px solid #9ca3af;
+  background: #e5e7eb;
+}
+.stim.home {
+  background: #cbd5e1;
+  border-color: #64748b;
+}
+.stim.target {
+  background: #2563eb;
+  border-color: #1d4ed8;
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 18, 25, 0.92);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  text-align: center;
+}
+.overlay-content h2 { font-size: 22px; }
+.overlay-content { max-width: 480px; }

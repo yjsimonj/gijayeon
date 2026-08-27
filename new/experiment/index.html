@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>마우스 보정 실험</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ===================== 설정 화면 ===================== -->
+<section id="screen-setup" class="screen active">
+  <div class="panel">
+    <h1>마우스 보정 실험</h1>
+
+    <div class="field">
+      <label for="participantId">참가자 ID</label>
+      <input type="text" id="participantId" placeholder="예: P01">
+    </div>
+
+    <div class="field">
+      <label>실행할 단계</label>
+      <div class="radio-row">
+        <label><input type="radio" name="phase" value="0" checked> 0단계 — 예비실험(버튼 크기 결정)</label>
+        <label><input type="radio" name="phase" value="1"> 1단계 — 학습 데이터 수집 (단일 버튼 400회)</label>
+        <label><input type="radio" name="phase" value="2"> 2단계 — 단일 버튼 평가 (120회)</label>
+        <label><input type="radio" name="phase" value="3"> 3단계 — 다중 버튼 평가 (240회)</label>
+      </div>
+    </div>
+
+    <div class="field" id="field-button-sizes-config">
+      <label>버튼 크기 설정 (phase0_button_sizes.json) — 1·2·3단계 필수</label>
+      <input type="file" id="buttonSizesConfigInput" accept="application/json">
+      <div class="hint" id="buttonSizesConfigStatus">불러오지 않음</div>
+    </div>
+
+    <div class="field" id="field-gap-config">
+      <label>간격 설정 (참가자 gap config) — 3단계 필수</label>
+      <input type="file" id="gapConfigInput" accept="application/json">
+      <div class="hint" id="gapConfigStatus">불러오지 않음</div>
+    </div>
+
+    <div class="field">
+      <button id="startRunBtn" class="primary" disabled>전체화면으로 시작</button>
+      <div class="hint" id="startBlockedReason"></div>
+    </div>
+
+    <hr>
+
+    <div class="field">
+      <button id="goAggregateBtn">0단계 결과 집계 화면으로</button>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 0단계 결과 집계 화면 ===================== -->
+<section id="screen-phase0-aggregate" class="screen">
+  <div class="panel">
+    <h1>0단계 결과 집계 — 버튼 크기 3종 자동 선택</h1>
+    <p class="hint">0단계에서 내보낸 참가자별 JSON 파일을 전부(2~3명분) 선택하세요. 풀링 후 로지스틱 회귀로 크기 3종을 산출합니다.</p>
+
+    <div class="field">
+      <input type="file" id="phase0FilesInput" accept="application/json" multiple>
+      <button id="runAggregateBtn">집계 실행</button>
+    </div>
+
+    <div id="aggregateResult" class="hidden">
+      <table id="aggregateTable">
+        <thead><tr><th>크기(px)</th><th>표본수</th><th>관측 성공률</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p id="aggregateFit"></p>
+      <p id="aggregateSelected"></p>
+      <button id="downloadPhase0ConfigBtn" class="primary">phase0_button_sizes.json 다운로드</button>
+    </div>
+
+    <button id="backToSetupFromAggregateBtn">설정 화면으로</button>
+  </div>
+</section>
+
+<!-- ===================== 진행 화면(전체화면) ===================== -->
+<section id="screen-run" class="screen">
+  <div id="statusbar">
+    <span id="statusParticipant"></span>
+    <span id="statusPhase"></span>
+    <span id="statusProgress"></span>
+    <button id="abortBtn">중단</button>
+  </div>
+  <div id="timeBar"><div id="timeBarFill"></div></div>
+  <div id="stage"></div>
+
+  <div id="rest-overlay" class="overlay hidden">
+    <div class="overlay-content">
+      <h2>휴식 시간</h2>
+      <p><span id="restCountdown">30</span>초 후 계속됩니다.</p>
+    </div>
+  </div>
+
+  <div id="fullscreen-lost-overlay" class="overlay hidden">
+    <div class="overlay-content">
+      <h2>전체화면이 해제되었습니다</h2>
+      <p>실험을 계속하려면 전체화면으로 돌아가야 합니다.</p>
+      <button id="reenterFullscreenBtn" class="primary">전체화면 재진입</button>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 완료 화면 ===================== -->
+<section id="screen-done" class="screen">
+  <div class="panel">
+    <h1 id="doneTitle">완료</h1>
+    <div id="doneSummary"></div>
+
+    <button id="exportJsonBtn" class="primary">JSON 내보내기</button>
+
+    <div id="phase1SigmaBlock" class="hidden">
+      <hr>
+      <h2>σ / gap config</h2>
+      <div id="sigmaSummary"></div>
+      <button id="downloadGapConfigBtn" class="primary">gap config 다운로드</button>
+      <p class="hint">이 파일을 <code>compute_sigma.py</code>에 같은 1단계 export를 돌린 결과와 대조하세요 (README 참고).</p>
+    </div>
+
+    <button id="backToSetupFromDoneBtn">설정 화면으로</button>
+  </div>
+</section>
+
+<script src="app.js"></script>
+</body>
+</html>

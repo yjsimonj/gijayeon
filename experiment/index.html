@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>개인화 마우스 보정 실험 · UI·시선·클릭패턴 기여도 분리</title>
+
+<!-- WebGazer.js (시선추적). 안정 npm 빌드를 jsDelivr에서 로드(brown.edu 호스팅 빌드는 begin()에서 't is not a function' 버그).
+     로드 실패 시 unpkg로 폴백. 둘 다 실패하면 시선 기능만 비활성화되고 나머지는 정상 동작. -->
+<script src="https://cdn.jsdelivr.net/npm/webgazer@3.3.0/dist/webgazer.min.js"
+        onerror="var s=document.createElement('script');s.src='https://unpkg.com/webgazer@3.3.0/dist/webgazer.min.js';document.head.appendChild(s);"></script>
+
+<style>
+  :root{
+    --bg:#0f1420; --panel:#171d2b; --panel2:#1e2740; --line:#2b3552;
+    --ink:#e8ecf6; --muted:#9aa6c4; --accent:#4f8cff; --accent2:#2f6bdc;
+    --good:#39c07d; --bad:#ff6b6b; --warn:#f5b544;
+    --target:#4f8cff; --distractor:#37507e;
+    --home:#2f6bdc; --shadow:0 8px 30px rgba(0,0,0,.35);
+    --mono:"Consolas","SFMono-Regular",ui-monospace,monospace;
+    --sans:"Malgun Gothic","맑은 고딕",-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:var(--sans); -webkit-font-smoothing:antialiased;
+    overflow:hidden;
+  }
+  button{font-family:inherit;}
+  .hidden{display:none !important;}
+
+  /* ---------- 화면 공통 ---------- */
+  .screen{position:fixed; inset:0; display:none; overflow:auto;}
+  .screen.active{display:block;}
+  .wrap{max-width:960px; margin:0 auto; padding:32px 28px 80px;}
+
+  h1{font-size:22px; margin:0 0 4px; letter-spacing:-.2px;}
+  h2{font-size:16px; margin:26px 0 10px; color:var(--accent); letter-spacing:-.2px;}
+  .sub{color:var(--muted); font-size:13px; line-height:1.55; margin:0 0 18px;}
+  p{line-height:1.6; font-size:14px;}
+  code{font-family:var(--mono); background:#0c101a; padding:1px 6px; border-radius:5px; color:#cdd8f5; font-size:12.5px;}
+
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:20px 22px; margin:14px 0; box-shadow:var(--shadow);}
+  .card h3{margin:0 0 8px; font-size:15px;}
+  .row{display:flex; gap:12px; flex-wrap:wrap; align-items:center;}
+  .row.spread{justify-content:space-between;}
+
+  label.field{display:flex; flex-direction:column; gap:6px; font-size:12.5px; color:var(--muted);}
+  input[type=text], input[type=number], select{
+    background:#0c101a; color:var(--ink); border:1px solid var(--line);
+    border-radius:9px; padding:9px 11px; font-size:14px; min-width:120px;
+  }
+  input:focus, select:focus{outline:2px solid var(--accent2); outline-offset:0;}
+
+  .btn{
+    background:var(--accent); color:#fff; border:none; border-radius:10px;
+    padding:11px 18px; font-size:14px; font-weight:600; cursor:pointer; transition:.12s;
+  }
+  .btn:hover{background:var(--accent2);}
+  .btn.ghost{background:transparent; border:1px solid var(--line); color:var(--ink);}
+  .btn.ghost:hover{border-color:var(--accent);}
+  .btn.small{padding:8px 13px; font-size:13px;}
+  .btn:disabled{opacity:.4; cursor:not-allowed;}
+
+  .pill{display:inline-block; padding:3px 9px; border-radius:999px; font-size:11.5px; border:1px solid var(--line); color:var(--muted);}
+  .pill.on{color:var(--good); border-color:var(--good);}
+  .pill.off{color:var(--muted);}
+
+  table{border-collapse:collapse; width:100%; font-size:12.5px; margin-top:6px;}
+  th,td{border:1px solid var(--line); padding:7px 9px; text-align:center;}
+  th{background:var(--panel2); color:#cdd8f5; font-weight:600;}
+  td.l,th.l{text-align:left;}
+  tbody tr:nth-child(even){background:rgba(255,255,255,.02);}
+
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:12px;}
+  @media(max-width:680px){ .grid2{grid-template-columns:1fr;} }
+
+  .note{font-size:12px; color:var(--muted); line-height:1.5;}
+  .kbd{font-family:var(--mono); background:#0c101a; border:1px solid var(--line); border-bottom-width:2px; border-radius:6px; padding:1px 7px; font-size:12px;}
+
+  /* ---------- 상단 상태바 ---------- */
+  #statusbar{
+    position:fixed; top:0; left:0; right:0; height:40px; z-index:50;
+    background:rgba(15,20,32,.85); backdrop-filter:blur(6px);
+    border-bottom:1px solid var(--line); display:flex; align-items:center; gap:14px;
+    padding:0 16px; font-size:12.5px; color:var(--muted);
+  }
+  #statusbar .grow{flex:1;}
+  #statusbar b{color:var(--ink); font-weight:600;}
+
+  /* ---------- 실험(자극) 화면 ---------- */
+  #stage{position:fixed; inset:0; top:40px; background:#0b0f18; cursor:crosshair; overflow:hidden;}
+  .stimBtn{
+    position:absolute; border:none; border-radius:8px; cursor:pointer;
+    background:#37507e; color:#dfe8ff; font-size:11px; font-weight:600;
+    display:flex; align-items:center; justify-content:center; user-select:none;
+    box-shadow:0 2px 6px rgba(0,0,0,.4);
+  }
+  .stimBtn.target{background:var(--target); box-shadow:0 0 0 2px rgba(79,140,255,.35), 0 4px 12px rgba(0,0,0,.5);}
+  .stimBtn.home{background:var(--home);}
+  .stimBtn.reveal-correct{outline:3px solid var(--good);}
+  .stimBtn.reveal-chosen{outline:3px dashed var(--warn);}
+
+  #clickMark, #corrMark{position:absolute; width:12px; height:12px; border-radius:50%; pointer-events:none; transform:translate(-50%,-50%); z-index:20;}
+  #clickMark{background:transparent; border:2px solid var(--bad);}
+  #corrMark{background:transparent; border:2px solid var(--good);}
+
+  #gazeDot{position:fixed; width:16px; height:16px; border-radius:50%; background:rgba(245,181,68,.55);
+           border:1px solid #f5b544; pointer-events:none; transform:translate(-50%,-50%); z-index:40; display:none;}
+  #zoneOverlay{position:absolute; inset:0; pointer-events:none; z-index:5;}
+  #zoneOverlay .cell{position:absolute; border:1px dashed rgba(154,166,196,.18);}
+  #zoneOverlay .cell.gaze{background:rgba(245,181,68,.10); border-color:rgba(245,181,68,.5);}
+
+  #trialMsg{position:fixed; left:50%; top:52%; transform:translate(-50%,-50%); z-index:30;
+            font-size:18px; color:var(--muted); text-align:center; pointer-events:none;}
+
+  #fixation{position:absolute; z-index:15; color:#6f7ea6; font-size:26px; transform:translate(-50%,-50%); pointer-events:none;}
+
+  /* progress */
+  .bar{height:6px; background:#0c101a; border-radius:999px; overflow:hidden; border:1px solid var(--line);}
+  .bar > i{display:block; height:100%; background:var(--accent); width:0;}
+
+  ul.tight{margin:6px 0; padding-left:18px;} ul.tight li{margin:4px 0; line-height:1.5; font-size:13.5px;}
+  .mono{font-family:var(--mono); font-size:12px;}
+  .sep{height:1px; background:var(--line); margin:18px 0;}
+  .flex-end{display:flex; justify-content:flex-end; gap:10px; margin-top:8px;}
+  .tag{font-size:11px; color:var(--muted); border:1px solid var(--line); border-radius:6px; padding:2px 7px;}
+
+  /* WebGazer 웹캠 미리보기: 작게, 우하단. pointer-events:none 으로 절대 클릭을 막지 않음(밑의 보정점/자극이 클릭됨). */
+  #webgazerVideoContainer{
+    position:fixed !important; left:auto !important; right:12px !important;
+    bottom:12px !important; top:auto !important;
+    width:150px !important; height:112px !important; z-index:80 !important;
+    border:1px solid var(--line); border-radius:10px; overflow:hidden; opacity:.82;
+    pointer-events:none !important;
+  }
+  #webgazerVideoFeed, #webgazerFaceOverlay, #webgazerFaceFeedbackBox, #webgazerVideoCanvas{
+    width:150px !important; height:112px !important; object-fit:cover !important;
+    pointer-events:none !important;
+  }
+  /* WebGazer 내장 시선 점·가이드 박스는 JS 토글이 버전에 따라 안 먹힐 때가 있어
+     아예 항상 숨김. 시선 시각화는 우리 커스텀 #gazeDot 하나로 통일. */
+  #webgazerGazeDot, #webgazerFaceFeedbackBox{ display:none !important; }
+</style>
+</head>
+<body>
+
+<!-- ============ 상단 상태바 ============ -->
+<div id="statusbar" class="hidden">
+  <span>참가자 <b id="sbPid">–</b></span>
+  <span>단계 <b id="sbPhase">–</b></span>
+  <span>조건 <b id="sbCond">–</b></span>
+  <span class="grow"></span>
+  <span id="sbGaze" class="pill off">시선 OFF</span>
+  <span>진행 <b id="sbProg">0 / 0</b></span>
+  <button class="btn ghost small" id="sbAbort">중단</button>
+</div>
+
+<!-- ============ 0. 메뉴 ============ -->
+<section id="scr-menu" class="screen active">
+  <div class="wrap">
+    <h1>개인화 마우스 보정 실험</h1>
+    <p class="sub">
+      UI 인식 · 시선추적 · 개인 클릭 패턴 — 세 요소의 기여도 분리 검증 &nbsp;|&nbsp;
+      <span class="tag">대전과학고 기초자율연구</span>
+      <span class="tag">주영준 · 고민혁 · 지도 이가연</span>
+    </p>
+
+    <div class="card">
+      <h3>1) 참가자 정보</h3>
+      <div class="row" style="margin-top:6px">
+        <label class="field">참가자 ID
+          <input type="text" id="pid" placeholder="예: P01" />
+        </label>
+        <label class="field">시선추적 사용
+          <select id="useGaze">
+            <option value="yes">사용 (웹캠 필요)</option>
+            <option value="no">미사용</option>
+          </select>
+        </label>
+      </div>
+      <details style="margin-top:14px">
+        <summary style="cursor:pointer; color:var(--muted); font-size:12.5px;">고급 설정 (안 건드려도 기본값으로 잘 동작함)</summary>
+        <div style="margin-top:12px">
+          <div class="row">
+            <label class="field">셀당 반복 수 (본실험)
+              <input type="number" id="repsPerCell" value="2" min="1" max="10" />
+            </label>
+            <label class="field">시선 구역 격자
+              <select id="gridSel">
+                <option value="3">3 × 3</option>
+                <option value="4">4 × 3</option>
+                <option value="6">3 × 2</option>
+                <option value="2">2 × 2</option>
+              </select>
+            </label>
+          </div>
+          <div style="margin-top:14px">
+            <div class="note" style="margin-bottom:6px">본실험에 포함할 조건 (하나만 체크하면 그 조건만 단독 테스트)</div>
+            <div class="row" style="gap:14px">
+              <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer"><input type="checkbox" class="condChk" value="C0" checked> 보정 없음</label>
+              <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer"><input type="checkbox" class="condChk" value="C1" checked> 버튼 위치만</label>
+              <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer"><input type="checkbox" class="condChk" value="C2" checked> 시선만</label>
+              <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer"><input type="checkbox" class="condChk" value="C3" checked> 시선+버튼위치</label>
+              <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer"><input type="checkbox" class="condChk" value="C4" checked> 전부 다</label>
+            </div>
+          </div>
+          <p class="note" style="margin-top:12px">
+            본실험 총 시행 수 = <b id="condCount">5</b>조건 × (2 크기 × 2 거리 × 2 시간) × 반복. 반복 2 → 조건당 16, 총 <b id="totalCalc">80</b>회.
+            빠른 확인은 반복 1을 권장.
+          </p>
+        </div>
+      </details>
+    </div>
+
+    <div class="card">
+      <h3>2) 방식별로 바로 비교해보기</h3>
+      <p class="note" style="margin-top:-4px; margin-bottom:10px">
+        아래 버튼 하나 누르면 "무보정" 대비 그 방식을 비교해서 바로 결과를 보여줍니다.
+        일부러 어려운 조건(작은 버튼·먼 거리·시간압박)으로 8번씩 해서, 원클릭이 실제로 빗나가고
+        보정이 그걸 고쳐주는지 볼 수 있게 했어요. 시선 관련 버튼은 먼저 위에서 "시선추적 사용"을 켜고,
+        ①번(시선 보정)을 해두면 더 정확합니다.
+      </p>
+      <div class="grid2" style="margin-top:10px">
+        <button class="btn ghost" data-go="tryUI">버튼 위치만 써보기</button>
+        <button class="btn ghost" data-go="tryGaze">시선만 써보기</button>
+        <button class="btn" data-go="tryBoth">둘 다 같이 써보기</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>3) 순서대로 진행 (진짜 실험)</h3>
+      <p class="note" style="margin-top:-4px; margin-bottom:10px">①→②→③→④ 순서대로 하시면 됩니다. 막히면 다음 걸 눌러도 괜찮아요.</p>
+      <div class="grid2" style="margin-top:10px">
+        <button class="btn ghost" data-go="calib">① 시선 보정하기</button>
+        <button class="btn ghost" data-go="preA">② 시선 정확도 확인</button>
+        <button class="btn ghost" data-go="preB">③ 버튼 인식 확인</button>
+        <button class="btn" data-go="main">④ 진짜 실험 (본실험, 시간 걸림)</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>4) 결과</h3>
+      <div class="row">
+        <button class="btn ghost small" data-go="results">결과·분석 보기</button>
+        <button class="btn ghost small" id="btnExportJSON">JSON 내보내기</button>
+        <button class="btn ghost small" id="btnExportCSV">CSV 내보내기</button>
+        <button class="btn ghost small" id="btnClear">데이터 초기화</button>
+        <span class="note" id="dataCount">기록된 시행 0건</span>
+      </div>
+    </div>
+
+    <p class="note" style="margin-top:22px">
+      ※ 이 실험은 화면의 버튼 위치, 웹캠으로 추정한 시선, 그리고 클릭 좌표를 클릭하는 그 순간에만 같이 봐서
+      "진짜 어디를 클릭하려던 건지" 추측해 보정합니다.
+    </p>
+  </div>
+</section>
+
+<!-- ============ 안내 화면 (범용) ============ -->
+<section id="scr-brief" class="screen">
+  <div class="wrap">
+    <h1 id="briefTitle">단계 안내</h1>
+    <div class="card"><div id="briefBody"></div></div>
+    <div class="flex-end">
+      <button class="btn ghost" data-go="menu">메뉴로</button>
+      <button class="btn" id="briefStart">시작</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 결과 화면 ============ -->
+<section id="scr-results" class="screen">
+  <div class="wrap">
+    <h1>결과 및 분석</h1>
+    <p class="sub">설계서 7장 분석 방법에 따른 요약. 조건 간 비교 · 요소 기여 분리 · 개인 패턴 일관성 · 시선 선행성 · 안전성(오보정).</p>
+    <div id="resultsBody"></div>
+    <div class="flex-end">
+      <button class="btn ghost" data-go="menu">메뉴로</button>
+      <button class="btn ghost" id="btnExportJSON2">JSON 내보내기</button>
+      <button class="btn" id="btnExportCSV2">CSV 내보내기</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 실험 자극 화면 ============ -->
+<div id="stage" class="hidden">
+  <div id="zoneOverlay"></div>
+  <div id="fixation" class="hidden">+</div>
+  <div id="clickMark" class="hidden"></div>
+  <div id="corrMark" class="hidden"></div>
+  <div id="trialMsg"></div>
+</div>
+<div id="gazeDot"></div>
+
+<!-- 보정용 오버레이 (calibration) -->
+<div id="calibLayer" class="hidden" style="position:fixed; inset:0; z-index:60; background:#0b0f18;">
+  <div style="position:absolute; top:16px; left:50%; transform:translateX(-50%); text-align:center; color:var(--muted); font-size:13px;">
+    빨간 점을 <b style="color:#fff">응시한 채로 5번씩 클릭</b>하세요. 모든 점을 채우면 자동으로 끝납니다.
+    <div class="note" id="calibProg" style="margin-top:4px">0 / 0</div>
+  </div>
+  <button class="btn ghost small" id="calibDone" style="position:absolute; top:14px; right:16px; z-index:90;">건너뛰기 / 완료</button>
+</div>
+
+<script src="app.js" defer></script>
+</body>
+</html>
