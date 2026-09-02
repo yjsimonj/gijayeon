@@ -114,10 +114,18 @@ def _zerogpu_placeholder():
 
 - **지우면 Space가 다시 죽는다.** 어디에도 연결하지 않았고 부르지도 않으므로 GPU가
   실제로 할당되는 일은 없다.
-- **torch 는 넣지 않는다.** `spaces` 는 torch 없이도 동작한다 —
-  `spaces/zero/torch/__init__.py` 가 `import torch` 를 try 로 감싸 두어 없으면 전부
-  no-op 이 되고, 시작 보고는 그대로 나간다. 검사를 통과하려고 2GB짜리 의존성을 넣을
-  이유가 없다.
+- **`spaces` 를 `requirements.txt` 에 적으면 빌드가 깨진다.** ZeroGPU Space는 빌드할 때
+  pip 명령에 `spaces==0.51.1` 을 직접 붙인다(빌드 로그에서 확인):
+
+  ```
+  pip install -r /tmp/requirements.txt "torch<=2.11.0" gradio[oauth]==5.9.1 ... spaces==0.51.1
+  ```
+
+  여기에 `spaces>=0.51.3` 을 얹으면 그 핀과 충돌해 pip이 죽는다 — 실제로 `BUILD_ERROR`
+  를 한 번 냈다. 플랫폼이 깔아 준 것을 그냥 쓴다. `torch` 도 플랫폼이 같이 깔지만
+  우리 코드는 요구하지 않는다 (`spaces` 는 torch 없이도 동작한다 —
+  `spaces/zero/torch/__init__.py` 가 `import torch` 를 try 로 감싸 두어 전부 no-op 이
+  되고 시작 보고는 그대로 나간다).
 - 나중에 하드웨어를 CPU basic 으로 바꿔도 **그대로 두면 된다.** ZeroGPU가 아닌 곳에서는
   `spaces.GPU` 가 함수를 그대로 돌려주고 아무것도 등록하지 않는다. `spaces` 자체가
   없으면(로컬 실행) `app.py` 가 `ImportError` 를 받아 건너뛴다.
@@ -209,7 +217,7 @@ python analyze.py ..\data --out ..\data\result.json --figures ..\figures
 ```
 new2/
 ├─ app.py                  Gradio 앱 — 화면을 얹고 결과를 data/ + Dataset repo 에 저장
-├─ requirements.txt        gradio, huggingface_hub, spaces
+├─ requirements.txt        gradio, huggingface_hub
 ├─ static/                 실험 화면 (로직 전부 여기 있다)
 │  ├─ experiment.html        마크업 (설정 → 진행 → 완료, 세 화면)
 │  ├─ experiment.css

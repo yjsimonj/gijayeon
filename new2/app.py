@@ -64,9 +64,14 @@ import gradio as gr
 # 자리표시자는 어디에도 연결하지 않고 호출도 하지 않는다. 호출하지 않으므로 GPU가
 # 실제로 할당되는 일도 없다.
 #
-# torch는 필요 없다. spaces/zero/torch/__init__.py 가 import torch 를 try 로 감싸
-# 두어서, 없으면 patch()·pack() 이 전부 no-op 으로 떨어지고 startup_report() 는
-# 그대로 나간다. 확인만 하려고 2GB짜리 의존성을 넣을 이유가 없다.
+# spaces 는 requirements.txt 에 적지 않는다. ZeroGPU Space는 빌드 시 pip 명령에
+# spaces==0.51.1 을 직접 붙이므로, 여기서 버전을 요구하면 그 핀과 충돌해 빌드가
+# 깨진다(실제로 spaces>=0.51.3 으로 BUILD_ERROR 를 냈다). 플랫폼이 깔아 준 것을 쓴다.
+# 0.51.1 과 0.51.3 의 판정 로직(zero/__init__.py, zero/decorator.py)은 동일하다.
+#
+# torch 도 요구하지 않는다. 플랫폼이 "torch<=2.11.0" 을 같이 깔지만, 없어도 무해하다 —
+# spaces/zero/torch/__init__.py 가 import torch 를 try 로 감싸 두어 없으면
+# patch()·pack() 이 전부 no-op 으로 떨어지고 startup_report() 는 그대로 나간다.
 try:
     import spaces
 except ImportError:
