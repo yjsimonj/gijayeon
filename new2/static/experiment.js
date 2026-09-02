@@ -168,6 +168,12 @@
    * 전체화면에서는 둘이 같은 CSS px로 보고되어 항상 1이 나온다 — 그래서 설정
    * 화면에서 재고, 그 값을 environment에 기록한다.
    */
+  /** HF Space 페이지처럼 앱이 다른 문서의 iframe 안에 얹혀 있는가. */
+  function isFramed() {
+    try { return window.self !== window.top; }
+    catch (e) { return true; }   // 접근이 막히면 그것 자체가 다른 출처의 iframe이라는 뜻
+  }
+
   function estimateZoom() {
     if (document.fullscreenElement) return null;
     if (!window.outerWidth || !window.innerWidth) return null;
@@ -982,6 +988,11 @@
     const size = Number($('mx-button-size').value);
 
     const reasons = [];
+    if (!document.fullscreenEnabled) {
+      reasons.push(isFramed()
+        ? '이 페이지가 다른 화면 안(iframe)에 들어 있어 전체화면을 쓸 수 없습니다 — 앱 주소를 새 창에서 직접 열어주세요.'
+        : '이 브라우저에서 전체화면이 허용되지 않습니다.');
+    }
     if (!id) reasons.push('참가자 ID를 입력하세요(영문·숫자·_·-).');
     else if (id !== rawId) reasons.push(`참가자 ID에 쓸 수 없는 문자가 있습니다 → "${id}" 로 저장됩니다. 그대로 쓰려면 입력을 고치세요.`);
     if (mode === 'main' && !(Number.isFinite(size) && size >= 4 && size <= 80)) {

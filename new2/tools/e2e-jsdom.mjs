@@ -97,6 +97,7 @@ Object.defineProperty(window, 'devicePixelRatio', { value: 1, configurable: true
 // 전체화면 스텁
 let fsElement = null;
 Object.defineProperty(document, 'fullscreenElement', { get: () => fsElement, configurable: true });
+Object.defineProperty(document, 'fullscreenEnabled', { value: true, configurable: true });
 window.HTMLElement.prototype.requestFullscreen = function () {
   fsElement = this;
   document.dispatchEvent(new window.Event('fullscreenchange'));
