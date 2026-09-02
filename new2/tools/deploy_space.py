@@ -54,9 +54,26 @@ REQUIRED_FILES = ["app.py", "requirements.txt",
                   "static/experiment.html", "static/experiment.js", "static/experiment.css"]
 
 
-def resolve_token(cli_token, purpose):
-    if cli_token:
-        return cli_token
+def read_token_file(path):
+    """토큰을 파일에서 읽는다. 명령행에 토큰을 적으면 셸 기록·화면에 남으므로,
+    남한테 대신 돌려 달라고 할 때는 이 방식이 안전하다."""
+    with open(path, encoding="utf-8-sig") as f:
+        token = f.read().strip()
+    if not token:
+        print(f"토큰 파일이 비어 있습니다: {path}", file=sys.stderr)
+        raise SystemExit(2)
+    return token
+
+
+def resolve_token(args, purpose, prefer_space=False):
+    if prefer_space and args.space_token_file:
+        return read_token_file(args.space_token_file)
+    if prefer_space and args.space_token:
+        return args.space_token
+    if args.token_file:
+        return read_token_file(args.token_file)
+    if args.token:
+        return args.token
     env = os.environ.get("HF_TOKEN", "").strip()
     if env:
         print(f"  토큰: 환경변수 HF_TOKEN 사용 ({purpose})")
@@ -73,7 +90,7 @@ def check_local_files():
 
 def deploy(args):
     check_local_files()
-    token = resolve_token(args.token, "repo 생성·업로드용")
+    token = resolve_token(args, "repo 생성·업로드용")
     api = HfApi(token=token)
 
     who = api.whoami()
@@ -84,18 +101,27 @@ def deploy(args):
 
     dataset_id = f"{args.user}/{args.dataset}"
     space_id = f"{args.user}/{args.space}"
-    space_token = args.space_token or token
-    if not args.space_token:
-        print("    (Space 시크릿에도 같은 토큰을 씁니다. 분리하려면 --space-token)")
+    separate = bool(args.space_token or args.space_token_file)
+    space_token = resolve_token(args, "Space 시크릿용", prefer_space=True) if separate else token
+    if not separate:
+        print("    (Space 시크릿에도 같은 토큰을 씁니다. 분리하려면 --space-token-file)")
 
     print(f"\n[1] Dataset repo (private) — {dataset_id}")
-    api.create_repo(dataset_id, repo_type="dataset", private=True, exist_ok=True)
-    print("    준비됨")
+    if args.no_create:
+        print("    --no-create: 이미 만들어진 repo를 그대로 씁니다")
+    else:
+        api.create_repo(dataset_id, repo_type="dataset", private=True, exist_ok=True)
+        print("    준비됨")
 
     print(f"\n[2] Space (gradio, public) — {space_id}")
-    api.create_repo(space_id, repo_type="space", space_sdk="gradio",
-                    private=False, exist_ok=True)
-    print("    준비됨 (README/sdk_version 은 HF가 만든 것을 그대로 둡니다)")
+    if args.no_create:
+        print("    --no-create: 이미 만들어진 Space를 그대로 씁니다")
+    else:
+        # cpu-basic Gradio Space는 2026년 기준 PRO 구독이 필요하다(402 Payment Required).
+        # 무료로 만들려면 웹 UI에서 하드웨어를 ZeroGPU로 고르고, 여기서는 --no-create.
+        api.create_repo(space_id, repo_type="space", space_sdk="gradio",
+                        space_hardware=args.hardware, private=False, exist_ok=True)
+        print(f"    준비됨 (하드웨어 {args.hardware}, README/sdk_version 은 HF가 만든 것을 그대로 둡니다)")
 
     print(f"\n[3] 시크릿·변수")
     api.add_space_secret(space_id, "HF_TOKEN", space_token,
@@ -138,7 +164,7 @@ def deploy(args):
 
 
 def check(args):
-    token = resolve_token(args.token, "Dataset repo 조회용")
+    token = resolve_token(args, "Dataset repo 조회용")
     api = HfApi(token=token)
     dataset_id = f"{args.user}/{args.dataset}"
 
@@ -173,10 +199,17 @@ def main(argv=None):
     ap.add_argument("--user", required=True, help="HF 계정(또는 조직) 이름")
     ap.add_argument("--space", default="mouse-calibration-exp", help="Space 이름")
     ap.add_argument("--dataset", default="mouse-exp-data", help="Dataset repo 이름")
-    ap.add_argument("--token", help="배포용 write 토큰 (생략하면 HF_TOKEN 또는 프롬프트)")
+    ap.add_argument("--token", help="배포용 write 토큰 (셸 기록에 남는다 — 되도록 --token-file)")
+    ap.add_argument("--token-file", help="토큰이 한 줄로 들어 있는 파일 경로 (권장)")
     ap.add_argument("--space-token", help="Space 시크릿에 넣을 업로드용 토큰 (생략하면 배포용과 동일)")
+    ap.add_argument("--space-token-file", help="Space 시크릿용 토큰 파일 경로")
+    ap.add_argument("--no-create", action="store_true",
+                    help="repo를 만들지 않고 시크릿 등록 + 업로드만 (웹 UI에서 이미 만든 경우)")
+    ap.add_argument("--hardware", default="cpu-basic",
+                    help="Space 하드웨어. cpu-basic 은 Gradio Space에 PRO가 필요하므로, "
+                         "무료로 만들려면 웹 UI에서 ZeroGPU를 골라 만든 뒤 --no-create 를 쓸 것")
     g = ap.add_mutually_exclusive_group(required=True)
-    g.add_argument("--deploy", action="store_true", help="repo 생성 + 시크릿 등록 + 업로드")
+    g.add_argument("--deploy", action="store_true", help="시크릿 등록 + 업로드 (필요하면 repo 생성)")
     g.add_argument("--check", action="store_true", help="Dataset repo에 쌓인 파일 확인")
     args = ap.parse_args(argv)
 

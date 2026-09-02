@@ -205,6 +205,16 @@
       ok: S.inputDevice === 'mouse',
       blocking: false, // 경고 + 확인 체크박스로 처리
     });
+    // HF Space 페이지처럼 앱이 iframe에 얹히면 전체화면이 막힐 수 있다. 그러면 주소창
+    // 높이가 좌표에 섞여(§7) 데이터가 조용히 오염되므로, 추측하지 않고 브라우저가
+    // 알려주는 fullscreenEnabled 로 직접 확인해 막는다.
+    rows.push({
+      name: '전체화면 사용 가능',
+      value: document.fullscreenEnabled ? '예' : (isFramed() ? '아니오 (iframe 제한)' : '아니오'),
+      rule: '가능해야 함',
+      ok: !!document.fullscreenEnabled,
+      blocking: true,
+    });
     return rows;
   }
 

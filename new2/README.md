@@ -1,3 +1,20 @@
+---
+title: Gijayeon
+emoji: 📊
+colorFrom: indigo
+colorTo: green
+sdk: gradio
+sdk_version: 6.26.0
+python_version: '3.12'
+app_file: app.py
+pinned: false
+short_description: gijayeon
+---
+
+<!-- 위 블록은 HF Space 빌드 설정이다 (Space를 만들 때 HF가 넣어 준 값 그대로).
+     이 폴더를 Space로 그대로 밀어 넣기 때문에, 지우면 Space가 SDK를 몰라 빌드가
+     깨진다. GitHub에서는 표로 보이는데 그건 무해하다. -->
+
 # 마우스 보정 실험 v3 — 실행 가이드
 
 `실험앱_계획서_v2(1).md`(구현 계획서 v3)를 실행하는 웹앱 + 분석 스크립트.
