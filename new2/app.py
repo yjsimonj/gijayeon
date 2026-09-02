@@ -26,7 +26,7 @@
 
                      HF_TOKEN         write 권한 토큰 (Space → Settings →
                                       Variables and secrets 에 secret 으로)
-                     HF_DATASET_REPO  기본값 yjsimonj/gijayeon-data (바꿀 때만)
+                     HF_DATASET_REPO  기본값 yjsimonj/mouse-exp-data (바꿀 때만)
 
                      HF_TOKEN 이 없으면 업로드만 건너뛴다 — 로컬 실행(계획서 1안)은
                      토큰 없이 그대로 돌아간다.
@@ -49,7 +49,8 @@ DATA_DIR = os.environ.get("MOUSE_EXP_DATA_DIR") or os.path.join(HERE, "data")
 
 # Dataset repo 이름은 기본값을 박아 둔다. 계획서 §9 체크리스트가 "repo 이름 오타"를
 # 배포 전 확인 항목으로 꼽는데, 기본값이 있으면 그 실패 경로가 아예 없어진다.
-DATASET_REPO = (os.environ.get("HF_DATASET_REPO") or "yjsimonj/gijayeon-data").strip()
+# 이름은 계획서 §3.1 의 `계정/mouse-exp-data` 규약을 따른다.
+DATASET_REPO = (os.environ.get("HF_DATASET_REPO") or "yjsimonj/mouse-exp-data").strip()
 HF_TOKEN = (os.environ.get("HF_TOKEN") or "").strip()
 
 # HF Space 안에서 돌고 있는가. 토큰이 없을 때 경고 수준을 정하는 데 쓴다 — Space에서

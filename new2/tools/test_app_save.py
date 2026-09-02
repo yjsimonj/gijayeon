@@ -208,8 +208,8 @@ try:
     print("\n[8] Dataset 기본 repo — HF_DATASET_REPO 를 안 줘도 돈다")
     app = load_app(HF_TOKEN="hf_fake_token")
     app.save(payload(pid="P08"))
-    ok(_FakeHfApi.uploads and _FakeHfApi.uploads[0]["repo_id"] == "yjsimonj/gijayeon-data",
-       "기본값 yjsimonj/gijayeon-data 로 올린다 (repo 이름 오타 경로를 없앤다)",
+    ok(_FakeHfApi.uploads and _FakeHfApi.uploads[0]["repo_id"] == "yjsimonj/mouse-exp-data",
+       "기본값 yjsimonj/mouse-exp-data 로 올린다 (repo 이름 오타 경로를 없앤다)",
        str(_FakeHfApi.uploads[0]["repo_id"]) if _FakeHfApi.uploads else "업로드 없음")
 
     print("\n[9] 토큰이 없을 때 — 로컬 실행(계획서 1안)")

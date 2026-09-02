@@ -65,7 +65,7 @@ data/main_<참가자ID>_<시각>.json
 | | |
 |---|---|
 | Space | https://huggingface.co/spaces/yjsimonj/gijayeon |
-| Dataset (private) | https://huggingface.co/datasets/yjsimonj/gijayeon-data |
+| Dataset (private) | https://huggingface.co/datasets/yjsimonj/mouse-exp-data |
 | 코드 | https://github.com/yjsimonj/gijayeon → `new2/` |
 
 **Space 파일시스템은 재시작하면 초기화된다**(§2). Space는 놀리면 자고, 코드를 고치면
@@ -79,11 +79,29 @@ Space → Settings → Variables and secrets:
 | 이름 | 값 | 종류 |
 |---|---|---|
 | `HF_TOKEN` | **write** 권한 토큰 | secret |
-| `HF_DATASET_REPO` | `yjsimonj/gijayeon-data` | (생략 가능 — 기본값) |
+| `HF_DATASET_REPO` | `yjsimonj/mouse-exp-data` | (생략 가능 — 기본값) |
 
 `HF_TOKEN` 이 없으면 업로드만 건너뛰고 실험은 정상 동작한다. 다만 Space에서 토큰이
 없으면 완료 화면이 **"재시작하면 이 파일은 사라집니다"** 라고 경고한다 — 그 문구가
 보이면 secret이 안 걸린 것이니 세션을 더 돌리기 전에 고쳐야 한다.
+
+### 하드웨어는 CPU Basic
+
+Space → Settings → Hardware = **CPU basic (무료)**. 이 앱은 서버에서 계산을 거의
+안 하므로 그 이상이 필요 없다(계획서 §0).
+
+**ZeroGPU(`zero-a10g`)로 두면 앱이 시작 직후 죽는다.** ZeroGPU는 `@spaces.GPU` 로
+데코레이트한 함수를 요구하고, 없으면 이렇게 끝난다:
+
+```
+로컬 저장 폴더: /home/user/app/data
+* Running on local URL:  http://0.0.0.0:7860
+Stopping Node.js server...
+```
+
+에러 메시지는 `No @spaces.GPU function detected during startup`, stage는
+`RUNTIME_ERROR`. 로그만 보면 앱이 정상 기동한 뒤 조용히 멈춘 것처럼 보여서
+코드를 의심하게 되는데, 코드 문제가 아니라 하드웨어 설정 문제다.
 
 ### 코드 밀어 넣기
 
@@ -103,7 +121,7 @@ SDK를 몰라 빌드가 깨진다. `sdk_version: 5.9.1` 도 올리지 말 것(gr
 ### 결과 받기
 
 ```powershell
-huggingface-cli download yjsimonj/gijayeon-data --repo-type dataset --local-dir ..\data_hf
+huggingface-cli download yjsimonj/mouse-exp-data --repo-type dataset --local-dir ..\data_hf
 cd analysis
 python analyze.py ..\..\data_hf\raw --figures ..\figures
 ```
