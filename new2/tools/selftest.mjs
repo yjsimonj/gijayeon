@@ -129,6 +129,17 @@ ok([...blocks.values()].every((b) => [...countByDirection(b).values()].every((v)
 ok(main.every((s, i) => s.mainIndex === i), 'main_index가 0부터 연속');
 ok(main.every((s) => s.size === 12) && warm.every((s) => s.size === 12), '버튼 크기 1종 고정');
 
+// 화면의 기본 버튼 크기와 JS 기본값이 어긋나면, 참가자가 보는 숫자와 실제로 쓰이는
+// 값이 달라진다 — bind() 가 JS 값으로 덮어쓰므로 화면 쪽이 거짓말을 한다.
+const jsDefault = readSource(join(ROOT, 'static', 'experiment.js'))
+  .match(/DEFAULT_BUTTON_SIZE_PX\s*=\s*(\d+)/);
+const htmlDefault = readSource(join(ROOT, 'static', 'experiment.html'))
+  .match(/id="mx-button-size"[^>]*value="(\d+)"/);
+ok(jsDefault !== null && htmlDefault !== null, '기본 버튼 크기를 두 파일에서 찾음');
+if (jsDefault && htmlDefault) {
+  eq(htmlDefault[1], jsDefault[1], `기본 버튼 크기가 HTML·JS 일치 (${jsDefault[1]}px)`);
+}
+
 console.log('\n[2] 휴식 배치');
 const pauses = specs.filter((s) => s.pauseBefore);
 eq(pauses.filter((s) => s.pauseBefore === 'warmup-end').length, 1, '워밍업 종료 화면 1회');
@@ -145,7 +156,7 @@ eq(devApi._internal.buildSpecs(12).filter((s) => !s.warmup).length, 20, '축소 
 
 console.log('\n[3] 배치 기하 (거리 450px 고정, 화면 안)');
 for (const [vw, vh] of [[1440, 900], [1200, 800], [1920, 1080], [2560, 1440]]) {
-  for (const size of [8, 12, 32]) {
+  for (const size of [8, 12, 20, 32]) {   // 20 = 화면 기본값
     let allOk = true;
     let detail = '';
     for (const deg of I.DIRECTIONS_DEG) {

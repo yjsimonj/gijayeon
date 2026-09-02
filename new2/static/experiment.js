@@ -38,7 +38,7 @@
   const RESPONSE_CAP_MS = 3000;   // 이때까지 무클릭이면 no_response
   const INTER_TRIAL_BLANK_MS = 200;
   const START_BUTTON_SIZE_PX = 30;
-  const DEFAULT_BUTTON_SIZE_PX = 12;
+  const DEFAULT_BUTTON_SIZE_PX = 20;
 
   // 실행 세부
   const DRAG_THRESHOLD_PX = 50;   // mousedown~mouseup 이 이보다 멀면 드래그 → 폐기하고 계속 대기

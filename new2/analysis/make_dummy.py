@@ -222,7 +222,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="더미 데이터 생성 (§8-3 분석 사전 점검용)")
     ap.add_argument("--out", required=True, help="저장 폴더")
     ap.add_argument("--participants", type=int, default=8)
-    ap.add_argument("--button-size", type=float, default=12)
+    ap.add_argument("--button-size", type=float, default=20)
     ap.add_argument("--sigma", type=float, default=4.0, help="축별 클릭 잡음 SD(px)")
     ap.add_argument("--common-bias", type=float, nargs=2, default=[0.4, -1.3],
                     help="전원 공통 편향 (x y). test01의 Δy=-1.28px 관측을 반영한 기본값")
