@@ -24,6 +24,7 @@
 import datetime
 import json
 import os
+import threading
 import traceback
 
 import gradio as gr
@@ -157,11 +158,17 @@ with gr.Blocks(title="마우스 보정 실험", **_BLOCKS_KWARGS) as demo:
 
 def main():
     demo.launch(**_LAUNCH_KWARGS)
-    # launch()가 블록하지 않고 곧바로 반환하는 조합에서는 여기서 프로세스가 끝나
-    # Space가 RUNTIME_ERROR로 죽는다. 그 경우를 대비해 명시적으로 붙잡아 둔다.
+    # Gradio 6의 launch()는 서버를 띄우고 곧바로 반환한다. 그대로 두면 main()이
+    # 끝나 프로세스가 죽고, Space는 에러 로그도 없이 RUNTIME_ERROR가 된다
+    # (로그 마지막 줄이 "Running on local URL"인 채로 끝나는 게 그 증상).
+    # block_thread()는 버전에 따라 없으므로, 마지막에는 스레드 이벤트로 확실히 막는다.
     try:
         demo.block_thread()
     except (AttributeError, KeyboardInterrupt, OSError):
+        pass
+    try:
+        threading.Event().wait()
+    except KeyboardInterrupt:
         pass
 
 
