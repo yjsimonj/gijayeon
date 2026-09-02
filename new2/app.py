@@ -43,6 +43,49 @@ import traceback
 
 import gradio as gr
 
+# ---------------------------------------------------------------- ZeroGPU
+# 이 Space는 ZeroGPU(zero-a10g) 하드웨어에 올라가 있다. ZeroGPU 런타임은 앱이
+# launch() 하는 순간 "@spaces.GPU 로 데코레이트된 함수가 하나라도 등록됐는지"를
+# 보고, 없으면 프로세스를 끊는다:
+#
+#   No @spaces.GPU function detected during startup   →  stage: RUNTIME_ERROR
+#
+# 로그에는 앱이 정상 기동한 뒤 조용히 멈춘 것처럼 찍혀서(Running on local URL
+# 다음 줄이 Stopping Node.js server...) 코드를 의심하게 되는 함정이다.
+#
+# spaces 패키지 안을 보면 판정 기준이 이렇다 (spaces/zero/__init__.py):
+#   - import 시점에 gr.Blocks.launch 를 감싸 두고 (gradio.one_launch)
+#   - launch() 가 불릴 때 startup() 을 먼저 돌리는데
+#   - decorator.decorated_cache 가 비어 있으면 그냥 return 해 버린다
+#     → 플랫폼이 기다리는 startup_report() 가 전송되지 않는다
+#
+# 그래서 필요한 것은 "GPU를 쓰는 코드"가 아니라 **등록된 함수 하나**다. 이 앱은
+# 서버에서 계산을 하지 않으므로(계획서 §2 — 실험 로직은 전부 브라우저 JS다) 아래
+# 자리표시자는 어디에도 연결하지 않고 호출도 하지 않는다. 호출하지 않으므로 GPU가
+# 실제로 할당되는 일도 없다.
+#
+# torch는 필요 없다. spaces/zero/torch/__init__.py 가 import torch 를 try 로 감싸
+# 두어서, 없으면 patch()·pack() 이 전부 no-op 으로 떨어지고 startup_report() 는
+# 그대로 나간다. 확인만 하려고 2GB짜리 의존성을 넣을 이유가 없다.
+try:
+    import spaces
+except ImportError:
+    # 로컬 실행(계획서 1안)에는 spaces 가 없다. 없어도 그대로 돌아야 한다.
+    spaces = None
+
+if spaces is not None:
+
+    @spaces.GPU
+    def _zerogpu_placeholder():
+        """ZeroGPU 시작 검사를 통과시키는 자리표시자. 부르지 않는다.
+
+        지우면 Space가 시작 직후 RUNTIME_ERROR 로 죽는다. 하드웨어를 CPU basic 으로
+        바꾸면 필요 없어지지만, 그때도 무해하다 — ZeroGPU가 아닌 곳에서는
+        spaces.GPU 가 함수를 그대로 돌려주고 아무것도 등록하지 않는다.
+        """
+        return None
+
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATIC = os.path.join(HERE, "static")
 DATA_DIR = os.environ.get("MOUSE_EXP_DATA_DIR") or os.path.join(HERE, "data")

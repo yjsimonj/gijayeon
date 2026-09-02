@@ -1,2 +1,6 @@
 gradio>=4.44
 huggingface_hub>=0.25
+
+# ZeroGPU 하드웨어에서 시작 검사를 통과하기 위한 것. app.py 의 ZeroGPU 절 참고.
+# torch 는 넣지 않는다 — spaces 는 torch 없이도 동작한다(전부 no-op).
+spaces>=0.51.3

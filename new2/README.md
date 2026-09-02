@@ -85,23 +85,42 @@ Space → Settings → Variables and secrets:
 없으면 완료 화면이 **"재시작하면 이 파일은 사라집니다"** 라고 경고한다 — 그 문구가
 보이면 secret이 안 걸린 것이니 세션을 더 돌리기 전에 고쳐야 한다.
 
-### 하드웨어는 CPU Basic
+### 하드웨어: ZeroGPU 에 맞춰 두었다
 
-Space → Settings → Hardware = **CPU basic (무료)**. 이 앱은 서버에서 계산을 거의
-안 하므로 그 이상이 필요 없다(계획서 §0).
+이 Space는 **ZeroGPU(`zero-a10g`)** 로 설정돼 있다. 이 앱은 서버에서 계산을 안 하니
+계획서 §0대로면 CPU Basic 이 맞지만, 하드웨어를 바꿀 수 없어 코드가 ZeroGPU 조건을
+맞춘다.
 
-**ZeroGPU(`zero-a10g`)로 두면 앱이 시작 직후 죽는다.** ZeroGPU는 `@spaces.GPU` 로
-데코레이트한 함수를 요구하고, 없으면 이렇게 끝난다:
+ZeroGPU 런타임은 앱이 `launch()` 하는 순간 **`@spaces.GPU` 로 데코레이트된 함수가
+하나라도 등록됐는지** 보고, 없으면 프로세스를 끊는다:
 
 ```
 로컬 저장 폴더: /home/user/app/data
 * Running on local URL:  http://0.0.0.0:7860
-Stopping Node.js server...
+Stopping Node.js server...          ← 여기서 끝난다
 ```
 
-에러 메시지는 `No @spaces.GPU function detected during startup`, stage는
-`RUNTIME_ERROR`. 로그만 보면 앱이 정상 기동한 뒤 조용히 멈춘 것처럼 보여서
-코드를 의심하게 되는데, 코드 문제가 아니라 하드웨어 설정 문제다.
+`errorMessage: No @spaces.GPU function detected during startup`, `stage: RUNTIME_ERROR`.
+로그만 보면 정상 기동한 뒤 조용히 멈춘 것처럼 읽혀 코드를 의심하게 되는데, 코드가
+아니라 **등록된 GPU 함수가 없다**는 뜻이다.
+
+그래서 `app.py` 에 호출하지 않는 자리표시자 하나를 둔다:
+
+```python
+@spaces.GPU
+def _zerogpu_placeholder():
+    return None
+```
+
+- **지우면 Space가 다시 죽는다.** 어디에도 연결하지 않았고 부르지도 않으므로 GPU가
+  실제로 할당되는 일은 없다.
+- **torch 는 넣지 않는다.** `spaces` 는 torch 없이도 동작한다 —
+  `spaces/zero/torch/__init__.py` 가 `import torch` 를 try 로 감싸 두어 없으면 전부
+  no-op 이 되고, 시작 보고는 그대로 나간다. 검사를 통과하려고 2GB짜리 의존성을 넣을
+  이유가 없다.
+- 나중에 하드웨어를 CPU basic 으로 바꿔도 **그대로 두면 된다.** ZeroGPU가 아닌 곳에서는
+  `spaces.GPU` 가 함수를 그대로 돌려주고 아무것도 등록하지 않는다. `spaces` 자체가
+  없으면(로컬 실행) `app.py` 가 `ImportError` 를 받아 건너뛴다.
 
 ### 코드 밀어 넣기
 
@@ -190,7 +209,7 @@ python analyze.py ..\data --out ..\data\result.json --figures ..\figures
 ```
 new2/
 ├─ app.py                  Gradio 앱 — 화면을 얹고 결과를 data/ + Dataset repo 에 저장
-├─ requirements.txt        gradio, huggingface_hub
+├─ requirements.txt        gradio, huggingface_hub, spaces
 ├─ static/                 실험 화면 (로직 전부 여기 있다)
 │  ├─ experiment.html        마크업 (설정 → 진행 → 완료, 세 화면)
 │  ├─ experiment.css
@@ -211,7 +230,7 @@ new2/
 ```powershell
 cd c:\Lab\gijayoun\new2
 node tools/selftest.mjs          # 47개 — 시퀀스·기하·스키마 정합
-python tools/test_app_save.py    # 35개 — 저장·업로드·파일명·오류 처리
+python tools/test_app_save.py    # 41개 — 저장·업로드·ZeroGPU·오류 처리
 ```
 
 `selftest.mjs` 는 **experiment.js / make_dummy.py / analyze.py 세 파일의 시행 레코드

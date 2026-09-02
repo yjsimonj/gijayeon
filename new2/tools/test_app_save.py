@@ -20,6 +20,7 @@ huggingface_hub 도 가짜로 끼워 넣으므로 이 시험은 네트워크를 
 from __future__ import annotations
 
 import glob
+import io
 import json
 import os
 import shutil
@@ -259,6 +260,46 @@ try:
     msg = app_bad.save(payload())
     ok("저장 실패" in msg and "직접 받기" in msg,
        "예외를 던지지 않고 예비 다운로드로 안내", msg.replace("\n", " ")[:120])
+    print("\n[14] ZeroGPU 시작 검사 — @spaces.GPU 함수가 등록되는가")
+    # ZeroGPU 런타임은 launch() 시점에 데코레이트된 함수가 하나라도 있는지 보고,
+    # 없으면 프로세스를 끊는다. 여기서 재는 것은 "등록되었는가" 하나다.
+    decorated = []
+
+    def _fake_gpu(task=None, **kw):
+        if callable(task):
+            decorated.append(task)
+            return task
+        def wrap(fn):
+            decorated.append(fn)
+            return fn
+        return wrap
+
+    fake_spaces = types.ModuleType("spaces")
+    fake_spaces.GPU = _fake_gpu
+    sys.modules["spaces"] = fake_spaces
+    app = load_app()
+    ok(len(decorated) == 1, "@spaces.GPU 함수가 정확히 1개 등록된다", str(len(decorated)))
+    ok(decorated and decorated[0].__name__ == "_zerogpu_placeholder",
+       "등록된 것이 자리표시자", str([f.__name__ for f in decorated]))
+    ok(callable(getattr(app, "_zerogpu_placeholder", None)),
+       "모듈에서 접근 가능 (지우면 Space가 죽는다는 표시)")
+    # 자리표시자는 어디에도 연결되지 않아야 한다 — 불리면 GPU가 실제로 할당된다
+    src = io.open(os.path.join(ROOT, "app.py"), encoding="utf-8").read()
+    ok(src.count("_zerogpu_placeholder") == 1,
+       "자리표시자는 정의만 있고 호출·연결하는 곳이 없다",
+       f"{src.count('_zerogpu_placeholder')}회 등장")
+
+    print("\n[15] spaces 가 없을 때 — 로컬 실행은 그대로 돌아야 한다")
+    sys.modules.pop("spaces", None)
+    sys.modules["spaces"] = None      # import spaces → ImportError
+    app = load_app()
+    ok(app.spaces is None, "spaces 가 없으면 None 으로 두고 넘어간다")
+    before = len(saved_files())
+    msg = app.save(payload(pid="P15"))
+    ok("저장 완료" in msg and len(saved_files()) == before + 1,
+       "spaces 없이도 저장이 정상 동작", msg.replace("\n", " "))
+    sys.modules.pop("spaces", None)
+
 finally:
     shutil.rmtree(DATA_DIR, ignore_errors=True)
 
