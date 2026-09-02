@@ -47,10 +47,68 @@ data/main_<참가자ID>_<시각>.json
 
 같은 참가자를 두 번 돌려도 시각이 달라 덮어쓰지 않는다.
 저장 폴더를 바꾸려면 환경변수 `MOUSE_EXP_DATA_DIR`.
+환경변수 `HF_TOKEN` 을 주면 HF Dataset repo에도 같이 올라간다(아래 "원격 수집").
+로컬 실행만 할 거면 토큰은 필요 없다.
 
 다른 PC의 참가자가 접속하게 하려면 `app.py` 의 `demo.launch(**_LAUNCH_KWARGS)` 에
 `server_name="0.0.0.0"` 을 추가하고, 같은 네트워크에서 `http://<이 PC의 IP>:7860` 으로
 접속하면 된다. 이때도 저장은 이 PC의 `data/` 에 쌓인다.
+
+---
+
+## 원격 수집 — HF Space + Dataset
+
+한 PC에 8명을 모을 수 있으면 위 로컬 실행이 낫다(계획서 §1). 마우스·화면이 자동으로
+통제되는데 이 연구에서는 그게 편의 문제가 아니라 타당도 문제다(§7). 원격이 불가피할
+때만 아래를 쓴다.
+
+| | |
+|---|---|
+| Space | https://huggingface.co/spaces/yjsimonj/gijayeon |
+| Dataset (private) | https://huggingface.co/datasets/yjsimonj/gijayeon-data |
+| 코드 | https://github.com/yjsimonj/gijayeon → `new2/` |
+
+**Space 파일시스템은 재시작하면 초기화된다**(§2). Space는 놀리면 자고, 코드를 고치면
+재빌드되고, 가끔 알아서 재시작한다. 그래서 원격 수집에서는 `data/` 를 믿을 수 없고
+Dataset repo가 실제 저장소다. `app.py` 는 **양쪽에 다 쓴다** — 로컬 `data/` 와 Dataset.
+
+### 준비 (한 번만)
+
+Space → Settings → Variables and secrets:
+
+| 이름 | 값 | 종류 |
+|---|---|---|
+| `HF_TOKEN` | **write** 권한 토큰 | secret |
+| `HF_DATASET_REPO` | `yjsimonj/gijayeon-data` | (생략 가능 — 기본값) |
+
+`HF_TOKEN` 이 없으면 업로드만 건너뛰고 실험은 정상 동작한다. 다만 Space에서 토큰이
+없으면 완료 화면이 **"재시작하면 이 파일은 사라집니다"** 라고 경고한다 — 그 문구가
+보이면 secret이 안 걸린 것이니 세션을 더 돌리기 전에 고쳐야 한다.
+
+### 코드 밀어 넣기
+
+Space는 `new2/` 를 **루트로** 받는다(`app.py` 가 최상단에 와야 한다). 그래서
+subtree로 민다:
+
+```powershell
+cd c:\Lab\gijayoun
+git push origin master                          # GitHub (저장소 전체)
+git subtree push --prefix=new2 space main        # HF Space (new2/ 만)
+```
+
+`README.md` 맨 위 YAML 블록이 Space 빌드 설정이다. **지우지 말 것** — 지우면 Space가
+SDK를 몰라 빌드가 깨진다. `sdk_version: 5.9.1` 도 올리지 말 것(gradio 6.26은 launch()
+직후 프로세스가 죽는다).
+
+### 결과 받기
+
+```powershell
+huggingface-cli download yjsimonj/gijayeon-data --repo-type dataset --local-dir ..\data_hf
+cd analysis
+python analyze.py ..\..\data_hf\raw --figures ..\figures
+```
+
+> **Dataset repo는 private으로 유지할 것.** 원본 JSON에 학번·이름이 들어 있다(§6-6).
 
 ---
 
@@ -113,8 +171,8 @@ python analyze.py ..\data --out ..\data\result.json --figures ..\figures
 
 ```
 new2/
-├─ app.py                  Gradio 앱 — 화면을 얹고 결과를 data/ 에 저장
-├─ requirements.txt        gradio
+├─ app.py                  Gradio 앱 — 화면을 얹고 결과를 data/ + Dataset repo 에 저장
+├─ requirements.txt        gradio, huggingface_hub
 ├─ static/                 실험 화면 (로직 전부 여기 있다)
 │  ├─ experiment.html        마크업 (설정 → 진행 → 완료, 세 화면)
 │  ├─ experiment.css
@@ -135,7 +193,7 @@ new2/
 ```powershell
 cd c:\Lab\gijayoun\new2
 node tools/selftest.mjs          # 47개 — 시퀀스·기하·스키마 정합
-python tools/test_app_save.py    # 17개 — 저장·파일명·오류 처리
+python tools/test_app_save.py    # 35개 — 저장·업로드·파일명·오류 처리
 ```
 
 `selftest.mjs` 는 **experiment.js / make_dummy.py / analyze.py 세 파일의 시행 레코드

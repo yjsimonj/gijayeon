@@ -11,6 +11,10 @@ app.py 의 save() 점검 — gradio 설치 없이 돌아간다.
     실험 화면이 아예 뜨지 않는다)
   - 결과가 data/ 에 제대로 저장되는가, 두 번 돌려도 덮어쓰지 않는가
   - 빈 문자열·깨진 JSON·과대 payload·위험한 참가자 ID를 어떻게 다루는가
+  - HF Dataset 업로드: 토큰이 있을 때/없을 때/실패할 때, 그리고 Space 위에서
+    토큰 없이 도는 상황(재시작하면 데이터가 사라진다)을 화면에 어떻게 알리는가
+
+huggingface_hub 도 가짜로 끼워 넣으므로 이 시험은 네트워크를 전혀 건드리지 않는다.
 """
 
 from __future__ import annotations
@@ -60,6 +64,28 @@ class _Blocks(_Fake):
         return False
 
 
+class _FakeHfApi:
+    """업로드 인자를 기록만 하는 가짜 HfApi. fail_with 를 세우면 그 예외를 던진다."""
+
+    uploads = []
+    fail_with = None
+
+    def upload_file(self, *, path_or_fileobj, path_in_repo, repo_id, repo_type, token):
+        if _FakeHfApi.fail_with is not None:
+            raise _FakeHfApi.fail_with
+        _FakeHfApi.uploads.append({
+            "bytes": path_or_fileobj,
+            "path_in_repo": path_in_repo,
+            "repo_id": repo_id,
+            "repo_type": repo_type,
+            "token": token,
+        })
+
+
+fake_hub = types.ModuleType("huggingface_hub")
+fake_hub.HfApi = _FakeHfApi
+sys.modules["huggingface_hub"] = fake_hub
+
 fake_gradio = types.ModuleType("gradio")
 fake_gradio.__version__ = "6.26.0"
 fake_gradio.Blocks = _Blocks
@@ -73,8 +99,18 @@ sys.path.insert(0, ROOT)
 DATA_DIR = tempfile.mkdtemp(prefix="mouse_exp_test_")
 
 
-def load_app():
+ENV_KEYS = ("HF_TOKEN", "HF_DATASET_REPO", "SPACE_ID")
+
+
+def load_app(**env):
+    """app 을 새로 import 한다. app.py 는 환경변수를 모듈 최상단에서 읽으므로,
+    토큰 있음/없음을 시험하려면 매번 다시 import 해야 한다."""
     os.environ["MOUSE_EXP_DATA_DIR"] = DATA_DIR
+    for k in ENV_KEYS:
+        os.environ.pop(k, None)
+    os.environ.update(env)
+    _FakeHfApi.uploads = []
+    _FakeHfApi.fail_with = None
     sys.modules.pop("app", None)
     import app  # noqa: E402  (환경변수를 세운 뒤 import 해야 DATA_DIR이 잡힌다)
     return app
@@ -151,8 +187,72 @@ try:
     msg = app.save(big)
     ok("너무 큽니다" in msg, "용량 상한에서 거절", msg[:60])
 
-    print("\n[7] 저장 폴더를 쓸 수 없을 때")
-    app_bad = app
+    print("\n[7] Dataset 업로드 — 토큰이 있을 때")
+    app = load_app(HF_TOKEN="hf_fake_token", HF_DATASET_REPO="acct/exp-data")
+    before = len(saved_files())
+    msg = app.save(payload(pid="P07", n_main=4))
+    ok(len(_FakeHfApi.uploads) == 1, "업로드가 1회 호출됨", str(len(_FakeHfApi.uploads)))
+    up = _FakeHfApi.uploads[0] if _FakeHfApi.uploads else {}
+    ok(up.get("repo_id") == "acct/exp-data" and up.get("repo_type") == "dataset",
+       "HF_DATASET_REPO 를 dataset repo 로 지정", f"{up.get('repo_id')} / {up.get('repo_type')}")
+    ok(str(up.get("path_in_repo", "")).startswith("raw/main_P07_"),
+       "repo 안 경로가 raw/main_<ID>_<시각>.json", str(up.get("path_in_repo")))
+    ok(up.get("token") == "hf_fake_token", "토큰이 그대로 전달됨")
+    ok(isinstance(up.get("bytes"), bytes) and
+       json.loads(up["bytes"].decode("utf-8"))["participant_id"] == "P07",
+       "올린 바이트가 유효한 JSON이고 내용이 맞다")
+    ok(len(saved_files()) == before + 1, "업로드와 별개로 로컬에도 남는다", str(len(saved_files())))
+    ok("저장 완료" in msg and "acct/exp-data" in msg and "서버 파일" in msg,
+       "화면 문구에 Dataset 경로와 서버 파일이 함께", msg.replace("\n", " "))
+
+    print("\n[8] Dataset 기본 repo — HF_DATASET_REPO 를 안 줘도 돈다")
+    app = load_app(HF_TOKEN="hf_fake_token")
+    app.save(payload(pid="P08"))
+    ok(_FakeHfApi.uploads and _FakeHfApi.uploads[0]["repo_id"] == "yjsimonj/gijayeon-data",
+       "기본값 yjsimonj/gijayeon-data 로 올린다 (repo 이름 오타 경로를 없앤다)",
+       str(_FakeHfApi.uploads[0]["repo_id"]) if _FakeHfApi.uploads else "업로드 없음")
+
+    print("\n[9] 토큰이 없을 때 — 로컬 실행(계획서 1안)")
+    app = load_app()
+    before = len(saved_files())
+    msg = app.save(payload(pid="P09"))
+    ok(not _FakeHfApi.uploads, "업로드를 시도하지 않는다")
+    ok(len(saved_files()) == before + 1, "로컬 저장은 그대로 된다")
+    ok("저장 완료" in msg and "Dataset" not in msg,
+       "Dataset 얘기 없이 조용히 넘어간다", msg.replace("\n", " "))
+
+    print("\n[10] Space 위에서 토큰 없이 — 재시작하면 사라진다고 경고해야 한다")
+    app = load_app(SPACE_ID="yjsimonj/gijayeon")
+    msg = app.save(payload(pid="P10"))
+    ok("저장 완료" in msg, "로컬 저장 자체는 성공")
+    ok("HF_TOKEN" in msg and "사라집니다" in msg and "직접 받기" in msg,
+       "토큰 누락·데이터 소실·예비 다운로드를 모두 알린다", msg.replace("\n", " "))
+
+    print("\n[11] 업로드가 실패할 때 — 세션은 건져야 한다")
+    app = load_app(HF_TOKEN="hf_fake_token")
+    _FakeHfApi.fail_with = RuntimeError("401 Unauthorized")
+    before = len(saved_files())
+    msg = app.save(payload(pid="P11", n_main=5))
+    ok(len(saved_files()) == before + 1, "업로드가 실패해도 로컬 파일은 남는다")
+    ok("저장 완료" in msg and "업로드는 실패" in msg and "401" in msg,
+       "실패 이유를 화면에 그대로 드러낸다", msg.replace("\n", " "))
+    ok("직접 받기" in msg, "예비 다운로드를 권한다")
+
+    print("\n[12] 로컬·업로드 둘 다 실패 — 이때만 '저장 실패'")
+    app = load_app(HF_TOKEN="hf_fake_token")
+    _FakeHfApi.fail_with = RuntimeError("network down")
+    app.DATA_DIR = os.path.join(DATA_DIR, "both_fail_not_a_dir")
+    with open(app.DATA_DIR, "w", encoding="utf-8") as f:
+        f.write("이 경로는 폴더가 아니다")
+    msg = app.save(payload(pid="P12"))
+    ok(msg.startswith("### ⚠ 저장 실패"), "'저장 실패' 로 시작", msg.replace("\n", " ")[:80])
+    ok("network down" in msg and "반드시 받아" in msg,
+       "양쪽 실패 이유 + 반드시 받으라는 지시", msg.replace("\n", " ")[:160])
+
+    print("\n[13] 저장 폴더를 쓸 수 없을 때 (토큰 없음)")
+    # [12] 는 토큰이 있는 app 을 쓰므로 여기서 새로 불러온다. 그러지 않으면
+    # "토큰 없음" 이라고 적어 놓고 실제로는 업로드까지 실패한 경로를 재는 셈이 된다.
+    app_bad = load_app()
     app_bad.DATA_DIR = os.path.join(DATA_DIR, "file_not_dir")
     with open(app_bad.DATA_DIR, "w", encoding="utf-8") as f:
         f.write("이 경로는 폴더가 아니다")
