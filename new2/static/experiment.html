@@ -1,0 +1,159 @@
+<!-- =====================================================================
+     마우스 보정 실험 v3 — 화면 마크업 (단일 소스)
+
+     이 파일은 <html>/<head>/<body> 를 갖지 않는 "조각"이다. 이유:
+       - app.py 가 gr.HTML(...) 로 그대로 삽입한다 (Gradio 페이지의 일부가 된다)
+       - static/index.html 이 fetch 로 같은 조각을 읽어 로컬 실행에 쓴다
+     마크업을 두 벌 두면 한쪽만 고치는 사고가 반드시 난다.
+
+     id는 전부 mx- 접두사를 쓴다. Gradio 자체 DOM과 충돌하지 않게.
+     단 #payload / #trigger 는 Gradio 컴포넌트 쪽 id이므로 여기 없다 (계획서 §3.3).
+===================================================================== -->
+<div id="mx-app">
+
+  <!-- ===================== 설정 화면 ===================== -->
+  <section id="mx-screen-setup" class="mx-screen active">
+    <div class="mx-panel">
+      <h1>마우스 보정 실험</h1>
+      <p class="mx-hint" id="mx-build-line"></p>
+
+      <div class="mx-field">
+        <label for="mx-participant-id">참가자 ID</label>
+        <input type="text" id="mx-participant-id" placeholder="예: P03" autocomplete="off">
+        <div class="mx-hint">영문·숫자·<code>_</code>·<code>-</code> 만 쓰세요. 파일명에 들어갑니다.</div>
+      </div>
+
+      <div class="mx-field mx-radio">
+        <label>모드</label>
+        <label><input type="radio" name="mx-mode" value="main" checked>
+          <b>모드 B — 본실험</b> (워밍업 <span class="mx-c-warmup-main"></span>회 + 본시행 <span class="mx-c-main"></span>회, 약 25분)</label>
+        <label><input type="radio" name="mx-mode" value="sizing">
+          <b>모드 A — 버튼 크기 정하기</b> (워밍업 <span class="mx-c-warmup-sizing"></span>회 + 본시행 <span class="mx-c-sizing"></span>회, 2~3명만)</label>
+      </div>
+
+      <div class="mx-field" id="mx-field-size">
+        <label for="mx-button-size">버튼 크기 (px) — 모드 B</label>
+        <input type="number" id="mx-button-size" min="4" max="80" step="1" value="12">
+        <div class="mx-hint">모드 A에서 산출한 값을 전원 공통으로 씁니다. 아래 “모드 A 결과 집계”에서 자동 입력할 수 있습니다.</div>
+      </div>
+
+      <div class="mx-field mx-inline">
+        <label>입력 장치</label>
+        <label><input type="radio" name="mx-device" value="mouse" checked> 마우스</label>
+        <label><input type="radio" name="mx-device" value="trackpad"> 트랙패드</label>
+        <div class="mx-bad mx-hidden" id="mx-trackpad-warn">
+          트랙패드는 편향 특성이 마우스와 근본적으로 달라, 섞으면 참가자 집단이 사실상 둘로 갈립니다(계획서 §7).
+          <br><label style="font-weight:400"><input type="checkbox" id="mx-trackpad-ack"> 알고도 진행합니다</label>
+        </div>
+      </div>
+
+      <div class="mx-field">
+        <label>환경 점검 (계획서 §7)</label>
+        <table>
+          <thead><tr><th>검사</th><th>측정값</th><th>기준</th><th>판정</th></tr></thead>
+          <tbody id="mx-env-body"></tbody>
+        </table>
+        <button id="mx-recheck-env">다시 점검</button>
+        <div class="mx-hint">
+          확대율은 전체화면 진입 전에만 추정할 수 있습니다(<code>outerWidth/innerWidth</code>). 100%가 아니면 <b>Ctrl+0</b>.
+          창 크기는 전체화면 진입 직후 실제 값으로 한 번 더 검사해, 미달이면 시작을 막습니다.
+        </div>
+      </div>
+
+      <div class="mx-field">
+        <p class="mx-hint">
+          마우스 가속(포인터 정밀도 향상) 끄기 · 브라우저 확대율 100% · 가능하면 8명 전원 같은 PC/같은 마우스 ·
+          학습 400회와 평가 200회는 <b>반드시 한 세션에</b>.
+        </p>
+        <button id="mx-start" class="mx-primary mx-big" disabled>전체화면으로 시작</button>
+        <div class="mx-bad" id="mx-start-blocked"></div>
+      </div>
+
+      <hr class="mx-sep">
+
+      <div class="mx-field">
+        <button id="mx-go-aggregate">모드 A 결과 집계 화면으로</button>
+      </div>
+
+      <div class="mx-field mx-hidden" id="mx-recovery-field">
+        <label>이전 세션 복구</label>
+        <div class="mx-hint">브라우저에 남아 있는 백업입니다. 다운로드를 놓친 세션이 있으면 여기서 받을 수 있습니다.</div>
+        <div id="mx-recovery-list"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== 모드 A 집계 화면 ===================== -->
+  <section id="mx-screen-aggregate" class="mx-screen">
+    <div class="mx-panel">
+      <h1>모드 A 결과 집계 — 버튼 크기 1종 산출</h1>
+      <p class="mx-hint">
+        모드 A로 내보낸 JSON(2~3명분)을 <b>전부 한 번에</b> 선택하세요.
+        풀링 후 <code>logit(성공) = a + b·ln(크기)</code> 를 적합해 성공률 65% 지점의 크기를 역산합니다(계획서 §4.2).
+      </p>
+
+      <div class="mx-field">
+        <input type="file" id="mx-aggregate-files" accept="application/json" multiple>
+        <button id="mx-run-aggregate">집계 실행</button>
+      </div>
+
+      <div id="mx-aggregate-result" class="mx-hidden">
+        <table>
+          <thead><tr><th>크기(px)</th><th>표본수</th><th>성공률</th></tr></thead>
+          <tbody id="mx-aggregate-body"></tbody>
+        </table>
+        <p id="mx-aggregate-fit"></p>
+        <p id="mx-aggregate-selected"></p>
+        <div id="mx-aggregate-warnings"></div>
+        <button id="mx-apply-size" class="mx-primary">이 크기를 모드 B에 적용</button>
+        <button id="mx-download-size">집계 결과 JSON 다운로드</button>
+      </div>
+
+      <hr class="mx-sep">
+      <button id="mx-back-from-aggregate">설정 화면으로</button>
+    </div>
+  </section>
+
+  <!-- ===================== 진행 화면 ===================== -->
+  <section id="mx-screen-run" class="mx-screen">
+    <div id="mx-timebar"><div id="mx-timebar-fill"></div></div>
+    <div id="mx-stage"></div>
+
+    <!-- 휴식 / 워밍업 종료: 참가자가 직접 재개 (계획서 §4.2) -->
+    <div id="mx-overlay-pause" class="mx-overlay mx-hidden">
+      <div class="mx-box">
+        <h2 id="mx-pause-title">휴식</h2>
+        <p id="mx-pause-text"></p>
+        <p class="mx-count" id="mx-pause-progress"></p>
+        <button id="mx-pause-resume" class="mx-primary mx-big">계속하기</button>
+      </div>
+    </div>
+
+    <div id="mx-overlay-fs" class="mx-overlay mx-hidden">
+      <div class="mx-box">
+        <h2>전체화면이 해제되었습니다</h2>
+        <p>좌표 기준이 달라지므로 이 상태로는 기록할 수 없습니다. 진행 중이던 시행 하나는 버리고 다시 제시합니다.</p>
+        <button id="mx-fs-reenter" class="mx-primary mx-big">전체화면으로 돌아가기</button>
+        <p class="mx-count">여기서 끝내야 한다면 → <button id="mx-fs-abort">중단하고 저장</button></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== 완료 화면 ===================== -->
+  <section id="mx-screen-done" class="mx-screen">
+    <div class="mx-panel">
+      <h1 id="mx-done-title">완료</h1>
+      <div id="mx-done-summary"></div>
+
+      <h2>저장</h2>
+      <p id="mx-save-status" class="mx-hint"></p>
+      <!-- 업로드 성공 여부와 무관하게 항상 표시한다 (계획서 §3.4).
+           25분짜리 세션을 토큰 만료나 오타 때문에 날릴 수 없다. -->
+      <button id="mx-download-json" class="mx-primary mx-big">JSON 다운로드</button>
+
+      <hr class="mx-sep">
+      <button id="mx-back-from-done">설정 화면으로</button>
+    </div>
+  </section>
+
+</div>

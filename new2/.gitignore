@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+
+# 더미 데이터·그림은 언제든 다시 만들 수 있다 (analysis/make_dummy.py)
+data_dummy*/
+figures_dummy*/

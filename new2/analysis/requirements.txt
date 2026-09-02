@@ -1,0 +1,5 @@
+# 분석은 Space가 아니라 로컬에서 돌린다 (계획서 §11).
+# Space용 requirements.txt(상위 폴더)에는 넣지 않는다.
+numpy>=1.26
+scipy>=1.11
+matplotlib>=3.8   # --figures 옵션에만 필요 (없어도 분석은 돌아간다)

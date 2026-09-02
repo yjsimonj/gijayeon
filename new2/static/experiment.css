@@ -1,0 +1,152 @@
+/* =====================================================================
+ * 마우스 보정 실험 v3 — 스타일
+ *
+ * 이 파일은 두 곳에서 쓰인다.
+ *  1) static/index.html   — 로컬 실행(A안). <link>로 로드.
+ *  2) app.py 의 Gradio head — <style> 로 인라인 주입.
+ *
+ * 그래서 html/body 전역을 함부로 건드리지 않는다. Gradio 페이지 레이아웃과
+ * 싸우면 설정 화면이 깨진다. 전역 규칙은 body.mx-standalone (로컬 실행 전용)과
+ * body.mx-running (실험 진행 중)에만 적용한다.
+ *
+ * 실험 진행 화면은 position:fixed 로 뷰포트를 통째로 덮으므로, 바깥 컨테이너가
+ * Gradio든 소박한 index.html이든 동일하게 동작한다.
+ * ===================================================================== */
+
+#mx-app, #mx-app * { box-sizing: border-box; }
+
+#mx-app {
+  font-family: -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
+  color: #1f2430;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+body.mx-standalone {
+  margin: 0;
+  background: #f4f5f7;
+}
+
+/* 진행 중에는 페이지 스크롤을 막는다. 실험 화면이 fixed로 덮고 있는데 배경이
+   스크롤되면 좌표가 어긋난 것처럼 보이고, 휠 스크롤이 클릭 위치를 흔든다. */
+body.mx-running {
+  overflow: hidden !important;
+}
+
+.mx-screen { display: none; }
+.mx-screen.active { display: block; }
+
+.mx-panel {
+  max-width: 760px;
+  margin: 28px auto;
+  padding: 24px 32px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+#mx-app h1 { font-size: 20px; margin: 0 0 4px; }
+#mx-app h2 { font-size: 16px; margin: 20px 0 8px; }
+#mx-app p { margin: 6px 0; font-size: 14px; line-height: 1.55; }
+
+.mx-field { margin-bottom: 18px; }
+.mx-field > label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 14px; }
+.mx-radio label { display: block; font-weight: 400; margin: 4px 0; font-size: 14px; }
+.mx-inline label { display: inline-block; margin-right: 18px; font-weight: 400; font-size: 14px; }
+
+#mx-app input[type="text"],
+#mx-app input[type="number"] {
+  padding: 8px;
+  font-size: 14px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+  color: #1f2430;
+}
+#mx-app input[type="text"] { width: 260px; }
+#mx-app input[type="number"] { width: 110px; }
+
+.mx-hint { font-size: 12px; color: #6b7280; margin-top: 4px; }
+.mx-warn { font-size: 13px; color: #b45309; margin-top: 6px; }
+.mx-bad { font-size: 13px; color: #b91c1c; margin-top: 6px; }
+.mx-ok { color: #15803d; }
+
+#mx-app button {
+  padding: 8px 16px;
+  font-size: 14px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+  color: #1f2430;
+  cursor: pointer;
+}
+#mx-app button:disabled { opacity: 0.45; cursor: not-allowed; }
+#mx-app button.mx-primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+#mx-app button.mx-big { padding: 12px 22px; font-size: 16px; }
+
+#mx-app table { border-collapse: collapse; width: 100%; margin: 10px 0; }
+#mx-app th, #mx-app td {
+  border: 1px solid #e5e7eb;
+  padding: 6px 10px;
+  text-align: right;
+  font-size: 13px;
+}
+#mx-app th:first-child, #mx-app td:first-child { text-align: left; }
+
+.mx-hidden { display: none !important; }
+.mx-sep { border: none; border-top: 1px solid #e5e7eb; margin: 22px 0; }
+
+/* ---------------- 진행 화면 ---------------- */
+
+#mx-stage {
+  position: fixed;
+  inset: 0;
+  background: #f4f5f7;
+  z-index: 30;
+  cursor: default;
+}
+
+/* 시간 압박 표시줄. 750ms 소프트 제한을 눈에 보이게 만든다 — 보이지 않으면
+   참가자가 버튼 위에서 느긋하게 미세조정해버려 측정하려는 오차 자체가
+   생기지 않는다. pointer-events:none 이라 위쪽 목표와 겹쳐도 클릭이 통과한다. */
+#mx-timebar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 5px;
+  background: #e5e7eb;
+  z-index: 40;
+  pointer-events: none;
+}
+#mx-timebar-fill {
+  height: 100%;
+  width: 0%;
+  background: #2563eb;
+}
+#mx-timebar-fill.mx-overtime { background: #dc2626; }
+
+.mx-stim {
+  position: absolute;
+  border-radius: 50%;
+  background: #cbd5e1;
+  border: 2px solid #64748b;
+}
+.mx-stim.mx-target {
+  background: #2563eb;
+  border-color: #1d4ed8;
+}
+
+.mx-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 18, 25, 0.94);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  text-align: center;
+}
+.mx-overlay .mx-box { max-width: 520px; padding: 0 24px; }
+.mx-overlay h2 { font-size: 22px; color: #fff; }
+.mx-overlay p { color: #e5e7eb; }
+.mx-overlay .mx-count { font-size: 15px; color: #9ca3af; }
