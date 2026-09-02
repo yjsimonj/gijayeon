@@ -56,6 +56,9 @@ class _Blocks(_Fake):
 
 
 fake_gradio = types.ModuleType("gradio")
+# app.py 는 이 값을 보고 head 를 Blocks 에 줄지 launch 에 줄지 고른다.
+# Space가 쓰는 버전과 같게 둔다 (README frontmatter 의 sdk_version).
+fake_gradio.__version__ = os.environ.get("FAKE_GRADIO_VERSION", "6.26.0")
 fake_gradio.Blocks = _Blocks
 fake_gradio.HTML = _Fake
 fake_gradio.Textbox = _Fake
@@ -104,6 +107,21 @@ def sample_payload(pid="P03", n=3):
 
 
 # ---------------------------------------------------------------- 시험
+
+print("\n[0] head(CSS·JS) 주입 위치 — Gradio 버전별")
+# Gradio 6은 head 를 Blocks 가 아니라 launch 에서 받는다. 잘못된 쪽에 주면 경고만
+# 뜨고 조용히 무시되어 실험 화면이 아예 뜨지 않는다 — 실제로 Space에서 겪은 사고다.
+for version, expect_launch in (("6.26.0", True), ("5.9.1", False), ("4.44.0", False)):
+    fake_gradio.__version__ = version
+    app = load_app()
+    in_launch = "mouseExperiment" in app._LAUNCH_KWARGS.get("head", "")
+    in_blocks = "mouseExperiment" in app._BLOCKS_KWARGS.get("head", "")
+    ok(in_launch == expect_launch and in_blocks != expect_launch,
+       f"gradio {version}: head → {'launch()' if expect_launch else 'Blocks()'}",
+       f"launch={in_launch}, blocks={in_blocks}")
+    ok("#payload, #trigger" in (app._LAUNCH_KWARGS.get("head", "") + app._BLOCKS_KWARGS.get("head", "")),
+       f"gradio {version}: 통로 컴포넌트 숨김 CSS 포함")
+fake_gradio.__version__ = "6.26.0"
 
 print("\n[1] 정상 업로드")
 app = load_app()

@@ -18,9 +18,22 @@
       <p class="mx-hint" id="mx-build-line"></p>
 
       <div class="mx-field">
+        <label for="mx-student-id">학번</label>
+        <input type="text" id="mx-student-id" placeholder="예: 20231234" autocomplete="off">
+      </div>
+
+      <div class="mx-field">
+        <label for="mx-name">이름</label>
+        <input type="text" id="mx-name" placeholder="예: 홍길동" autocomplete="off">
+      </div>
+
+      <div class="mx-field">
         <label for="mx-participant-id">참가자 ID</label>
         <input type="text" id="mx-participant-id" placeholder="예: P03" autocomplete="off">
-        <div class="mx-hint">영문·숫자·<code>_</code>·<code>-</code> 만 쓰세요. 파일명에 들어갑니다.</div>
+        <div class="mx-hint">
+          영문·숫자·<code>_</code>·<code>-</code> 만 쓰세요. <b>파일명에 들어갑니다.</b>
+          학번·이름은 파일 안에만 기록되고 파일명·분석에는 쓰이지 않습니다.
+        </div>
       </div>
 
       <div class="mx-field mx-radio">

@@ -140,7 +140,14 @@ function setValue(el, v) {
 }
 
 // 시작 차단 조건 (§7)
-ok($('mx-start').disabled, 'ID를 비운 채로는 시작 불가');
+ok($('mx-start').disabled, '학번·이름·ID를 비운 채로는 시작 불가');
+setValue($('mx-participant-id'), 'E2E01');
+ok($('mx-start').disabled && $('mx-start-blocked').textContent.includes('학번'),
+  '학번이 비어 있으면 막고 이유를 알려준다');
+setValue($('mx-student-id'), '20231234');
+ok($('mx-start').disabled && $('mx-start-blocked').textContent.includes('이름'),
+  '이름이 비어 있으면 막고 이유를 알려준다');
+setValue($('mx-name'), '홍길동');
 setValue($('mx-participant-id'), 'P 03!');
 ok($('mx-start').disabled && $('mx-start-blocked').textContent.includes('P03'),
   '쓸 수 없는 문자가 있으면 정리된 ID를 알려주고 막는다', $('mx-start-blocked').textContent);
@@ -290,6 +297,11 @@ if (data) {
   ok(data.schema_version === '3.0', 'schema_version 3.0');
   ok(data.mode === (SIZING ? 'sizing' : 'main'), `mode = ${SIZING ? 'sizing' : 'main'}`);
   ok(data.participant_id === 'E2E01', 'participant_id 기록');
+  ok(data.participant && data.participant.student_id === '20231234' && data.participant.name === '홍길동',
+    '학번·이름이 원본 JSON에 기록됨');
+  const saveText = $('mx-save-status').textContent;   // "파일명: main_E2E01_....json" 포함
+  ok(saveText.includes('파일명:') && !saveText.includes('20231234') && !saveText.includes('홍길동'),
+    '학번·이름은 파일명에 들어가지 않음', saveText);
   ok(data.trials.every((t, i) => t.index === i), 'index 연속');
   ok(main.every((t, i) => t.main_index === i), 'main_index 연속 (버린 시행이 번호를 비우지 않음)');
   ok(pauses > 0, `휴식/연습종료 화면 ${pauses}회 통과`);

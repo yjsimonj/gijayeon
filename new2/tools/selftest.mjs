@@ -257,6 +257,10 @@ const TRIAL_KEYS = [
   'n_trajectory_samples', 'drag_rejected',
 ];
 
+// Windows에서 체크아웃하면 git이 줄바꿈을 CRLF로 바꿔 놓는다. 아래 마커에 \n 을
+// 쓰므로, 읽을 때 LF로 정규화하지 않으면 블록을 못 찾는다(실제로 한 번 깨졌다).
+const readSource = (p) => readFileSync(p, 'utf-8').replace(/\r\n/g, '\n');
+
 function keysFromBlock(text, startMarker, endMarker, keyRegex) {
   const s = text.indexOf(startMarker);
   if (s < 0) return null;
@@ -269,12 +273,12 @@ function keysFromBlock(text, startMarker, endMarker, keyRegex) {
     .map((m) => m[1]);
 }
 
-const jsSrc = readFileSync(join(ROOT, 'static', 'experiment.js'), 'utf-8');
+const jsSrc = readSource(join(ROOT, 'static', 'experiment.js'));
 // `click,` 처럼 축약 표기(shorthand)도 키다 — `:` 만 보면 놓친다.
 const jsKeys = keysFromBlock(jsSrc, 'const record = {', '\n        };', /^ {10}([a-z_0-9]+)\s*[,:]/);
 ok(jsKeys !== null, 'experiment.js 의 시행 레코드 블록을 찾음');
 
-const pySrc = readFileSync(join(ROOT, 'analysis', 'make_dummy.py'), 'utf-8');
+const pySrc = readSource(join(ROOT, 'analysis', 'make_dummy.py'));
 const pyKeys = keysFromBlock(pySrc, '    return {\n        "index": index,', '\n    }',
   /^ {8}"([a-z_0-9]+)":/);
 ok(pyKeys !== null, 'make_dummy.py 의 시행 dict 블록을 찾음');
@@ -292,7 +296,7 @@ if (jsKeys && pyKeys) {
 }
 
 // analyze.py 가 실제로 읽는 키들이 스키마에 있는지 (오타 방지)
-const anSrc = readFileSync(join(ROOT, 'analysis', 'analyze.py'), 'utf-8');
+const anSrc = readSource(join(ROOT, 'analysis', 'analyze.py'));
 for (const k of ['main_index', 'no_response', 'button_size_px', 'error_x', 'error_y', 'warmup', 'timeout']) {
   ok(anSrc.includes(`"${k}"`), `analyze.py 가 ${k} 를 참조`);
 }

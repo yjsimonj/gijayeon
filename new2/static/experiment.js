@@ -73,6 +73,8 @@
 
   const S = {
     participantId: null,
+    studentId: null,     // 개인정보: 원본 JSON에만 남기고 파일명·분석에는 쓰지 않는다
+    name: null,
     mode: 'main',
     buttonSizePx: DEFAULT_BUTTON_SIZE_PX,
     inputDevice: 'mouse',
@@ -685,6 +687,9 @@
       schema_version: SCHEMA_VERSION,
       mode: S.mode,
       participant_id: S.participantId,
+      // 학번·이름은 개인정보다. 여기(원본 JSON)에만 두고 파일명·분석 결과에는
+      // 넣지 않는다. 분석은 participant_id 만 쓴다.
+      participant: { student_id: S.studentId, name: S.name },
       dev_mode: DEV_MODE,
       started_at: S.startedAt,
       finished_at: new Date().toISOString(),
@@ -841,6 +846,7 @@
     $('mx-done-summary').innerHTML = `
       <table>
         <tbody>
+          <tr><td>참가자</td><td>${payload.participant_id} · ${payload.participant.student_id} · ${payload.participant.name}</td></tr>
           <tr><td>본시행 / 워밍업</td><td>${s.nMain} / ${s.nWarmup}</td></tr>
           <tr><td>성공률 (본시행, 무응답 제외)</td><td>${pct(s.successRate)}</td></tr>
           <tr><td>평균 오차 (error_x, error_y)</td><td>${s.meanErrX === null ? '—' : s.meanErrX.toFixed(2)}, ${s.meanErrY === null ? '—' : s.meanErrY.toFixed(2)} px</td></tr>
@@ -986,6 +992,8 @@
     const rawId = $('mx-participant-id').value.trim();
     const id = sanitizeId(rawId);
     const size = Number($('mx-button-size').value);
+    const studentId = $('mx-student-id').value.trim();
+    const name = $('mx-name').value.trim();
 
     const reasons = [];
     if (!document.fullscreenEnabled) {
@@ -993,6 +1001,8 @@
         ? '이 페이지가 다른 화면 안(iframe)에 들어 있어 전체화면을 쓸 수 없습니다 — 앱 주소를 새 창에서 직접 열어주세요.'
         : '이 브라우저에서 전체화면이 허용되지 않습니다.');
     }
+    if (!studentId) reasons.push('학번을 입력하세요.');
+    if (!name) reasons.push('이름을 입력하세요.');
     if (!id) reasons.push('참가자 ID를 입력하세요(영문·숫자·_·-).');
     else if (id !== rawId) reasons.push(`참가자 ID에 쓸 수 없는 문자가 있습니다 → "${id}" 로 저장됩니다. 그대로 쓰려면 입력을 고치세요.`);
     if (mode === 'main' && !(Number.isFinite(size) && size >= 4 && size <= 80)) {
@@ -1004,6 +1014,8 @@
     }
 
     S.participantId = id;
+    S.studentId = studentId;
+    S.name = name;
     S.buttonSizePx = size;
     $('mx-start').disabled = reasons.length > 0;
     $('mx-start-blocked').innerHTML = reasons.join('<br>');

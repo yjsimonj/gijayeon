@@ -128,10 +128,18 @@ def save(payload: str):
 # 안 된다. 그래서 컴포넌트는 살려 두고 CSS로만 감춘다 — DOM에는 반드시 있어야 한다.
 BRIDGE_CSS = "#payload, #trigger { display: none !important; }"
 
-with gr.Blocks(
-    title="마우스 보정 실험",
-    head=f"<style>{CSS}{BRIDGE_CSS}</style><script>{JS}</script>",
-) as demo:
+HEAD = f"<style>{CSS}{BRIDGE_CSS}</style><script>{JS}</script>"
+
+# head 를 넘기는 위치가 Gradio 6에서 바뀌었다.
+#   ~5.x : gr.Blocks(head=...)
+#   6.0+ : demo.launch(head=...)      ← Blocks에 주면 경고만 뜨고 조용히 무시된다
+# 무시되면 CSS·JS가 주입되지 않아 실험 화면이 아예 뜨지 않으므로(실제로 겪었다),
+# 버전을 보고 넘길 곳을 고른다.
+_GRADIO_MAJOR = int(str(gr.__version__).split(".")[0])
+_BLOCKS_KWARGS = {} if _GRADIO_MAJOR >= 6 else {"head": HEAD}
+_LAUNCH_KWARGS = {"head": HEAD} if _GRADIO_MAJOR >= 6 else {}
+
+with gr.Blocks(title="마우스 보정 실험", **_BLOCKS_KWARGS) as demo:
     gr.HTML(HTML)
 
     # 실험 화면(JS)과 파이썬을 잇는 통로 (§3.3).
@@ -142,4 +150,4 @@ with gr.Blocks(
     trigger.click(save, inputs=payload, outputs=status)
 
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(**_LAUNCH_KWARGS)
