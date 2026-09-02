@@ -82,7 +82,7 @@ const dom = new JSDOM(
 const { window } = dom;
 const { document } = window;
 
-// 뷰포트·화면 정보 (jsdom 기본값 1024×768은 450px 시행에 모자란다)
+// 뷰포트·화면 정보 (jsdom 기본값 1024×768은 최대 500px 시행에 모자란다)
 for (const [k, v] of Object.entries({ innerWidth: VW, innerHeight: VH, outerWidth: VW, outerHeight: VH })) {
   Object.defineProperty(window, k, { value: v, configurable: true });
 }
@@ -299,20 +299,34 @@ if (data) {
   ok(answered.every((t) => t.success === (Math.hypot(t.error_x, t.error_y) <= t.button_size_px / 2)),
     'success = 중심에서 반지름 이내');
 
-  // 거리·방향
-  ok(main.every((t) => Math.abs(Math.hypot(t.target.x - t.start.x, t.target.y - t.start.y) - 450) < 0.2),
-    '모든 시행의 이동 거리 450px');
+  // 거리·방향 — 시행마다 다르게 뽑히므로 "기록된 거리와 실제 거리가 맞는가"를 본다
+  ok(main.every((t) => Math.abs(
+      Math.hypot(t.target.x - t.start.x, t.target.y - t.start.y) - t.distance_px) < 0.3),
+    '기록된 distance_px 가 실제 start→target 거리와 일치');
+  const dists = main.map((t) => t.distance_px);
+  ok(dists.every((d) => d >= 249.9 && d <= 500.1), 'distance_px 가 250~500px 범위 안',
+    `${Math.min(...dists).toFixed(0)}~${Math.max(...dists).toFixed(0)}`);
+  ok(new Set(dists).size > dists.length * 0.8, '거리가 시행마다 다르다 (고정이 아님)',
+    `${new Set(dists).size}종 / ${dists.length}시행`);
+  ok(new Set(main.map((t) => `${t.start.x},${t.start.y}`)).size > main.length * 0.8,
+    '시작점이 시행마다 다르다 — 학습·평가가 같은 기하를 공유하지 않는다',
+    `${new Set(main.map((t) => `${t.start.x},${t.start.y}`)).size}종`);
   if (!ABORT) {
-    const dirs = new Map([0, 90, 180, 270].map((d) => [d, 0]));
-    main.forEach((t) => dirs.set(t.direction_deg, dirs.get(t.direction_deg) + 1));
-    // 방향은 휴식 블록 안에서 균등 배분된다. 본실험은 100/4 = 25로 정확히 나뉘지만
-    // dev 축소 모드는 블록이 10회라 ±1이 남는다(블록 균등 자체는 selftest.mjs가 검사).
-    const tol = FULL ? 0 : 1;
-    ok([...dirs.values()].every((v) => Math.abs(v - main.length / 4) <= tol),
-      `4방향 균등 (허용 ±${tol})`, JSON.stringify([...dirs]));
+    // 방향은 블록마다 원을 층화 추출한다 → 합벡터가 0에 가까워야 한다
+    const cx = main.reduce((s, t) => s + Math.cos(t.direction_deg * Math.PI / 180), 0) / main.length;
+    const cy = main.reduce((s, t) => s + Math.sin(t.direction_deg * Math.PI / 180), 0) / main.length;
+    ok(Math.hypot(cx, cy) < (FULL ? 0.08 : 0.35), '방향이 한쪽으로 치우치지 않음',
+      `합벡터 ${Math.hypot(cx, cy).toFixed(3)}`);
+    const q = [0, 0, 0, 0];
+    main.forEach((t) => { q[Math.floor((((t.direction_deg % 360) + 360) % 360) / 90)]++; });
+    ok(q.every((v) => v > 0), '네 사분면 모두 등장', JSON.stringify(q));
   }
-  const up = data.trials.find((t) => t.direction_deg === 90);
-  ok(!!up && up.target.y < up.start.y, '90° 는 위쪽 (target.y < start.y)');
+  // 방향 규약: 목표 = 시작 + (cos θ, −sin θ)·거리. 부호를 놓치면 위아래가 뒤집힌다.
+  ok(main.every((t) => {
+    const rad = t.direction_deg * Math.PI / 180;
+    return Math.abs(t.target.x - (t.start.x + Math.cos(rad) * t.distance_px)) < 0.3 &&
+           Math.abs(t.target.y - (t.start.y - Math.sin(rad) * t.distance_px)) < 0.3;
+  }), '방향 규약 dy = −sin θ (0°=오른쪽, 90°=위)');
 
   // 궤적 형식 §3.5
   ok(main.every((t) => Array.isArray(t.trajectory) && t.trajectory.length >= 2), '궤적 샘플 2개 이상');
@@ -329,7 +343,7 @@ if (data) {
   ok(answered.every((t) => t.t_click >= t.t_target_shown), 't_click ≥ t_target_shown');
 
   ok(data.config.train_split === (FULL ? 400 : 12), 'config.train_split 기록');
-  ok(main.every((t) => t.button_size_px === 12), '버튼 크기 고정 12px');
+  ok(main.every((t) => t.button_size_px === 12), '버튼 크기 고정 12px (화면에서 12로 입력했다)');
   ok(data.environment.inner_width === VW && data.environment.inner_height === VH,
     'environment 에 뷰포트 기록');
 }

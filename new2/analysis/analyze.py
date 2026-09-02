@@ -137,6 +137,7 @@ def load_participant(path, warnings):
             "ex": float(t["error_x"]),
             "ey": float(t["error_y"]),
             "direction_deg": t.get("direction_deg"),
+            "distance_px": t.get("distance_px"),
             "rt_ms": t.get("rt_ms"),
             "timeout": bool(t.get("timeout")),
         }

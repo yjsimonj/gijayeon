@@ -31,8 +31,7 @@ import os
 import random
 
 SCHEMA_VERSION = "3.0"
-DISTANCE_PX = 450
-DIRECTIONS_DEG = [0, 90, 180, 270]
+DISTANCE_RANGE_PX = [250, 500]
 TIME_LIMIT_MS = 750
 RESPONSE_CAP_MS = 3000
 START_BUTTON_SIZE_PX = 30
@@ -44,11 +43,11 @@ def r1(v):
     return round(v, 1)
 
 
-def layout(size_px, deg, vw, vh):
-    """experiment.js 의 computeLayout 과 같은 규칙 (시작 버튼을 최소량만 민다)."""
+def layout(size_px, deg, dist, vw, vh, rng):
+    """experiment.js 의 computeLayout 과 같은 규칙 (시작점을 가능 영역에서 무작위)."""
     rad = math.radians(deg)
-    vx = math.cos(rad) * DISTANCE_PX
-    vy = -math.sin(rad) * DISTANCE_PX          # 90° = 위
+    vx = math.cos(rad) * dist
+    vy = -math.sin(rad) * dist                 # 90° = 위
     sr = START_BUTTON_SIZE_PX / 2
     tr = size_px / 2
 
@@ -57,23 +56,25 @@ def layout(size_px, deg, vw, vh):
     y_min = TOP_CLEARANCE_PX + max(sr, tr - vy)
     y_max = vh - max(sr, tr + vy) - EDGE_PADDING_PX
 
-    want_x = vw / 2
-    want_y = (TOP_CLEARANCE_PX + vh) / 2
-    sx = min(max(want_x, x_min), x_max)
-    sy = min(max(want_y, y_min), y_max)
-    return sx, sy, sx + vx, sy + vy, abs(sx - want_x) > 0.5 or abs(sy - want_y) > 0.5
+    sx = rng.uniform(x_min, x_max)
+    sy = rng.uniform(y_min, y_max)
+    return sx, sy, sx + vx, sy + vy
 
 
-def balanced(values, total, rng):
-    base, rest = divmod(total, len(values))
-    idx = list(range(len(values)))
-    rng.shuffle(idx)
-    bonus = set(idx[:rest])
-    out = []
-    for i, v in enumerate(values):
-        out += [v] * (base + (1 if i in bonus else 0))
-    rng.shuffle(out)
-    return out
+def stratified_geometry(n, rng):
+    """experiment.js 의 stratifiedGeometry 와 같은 규칙.
+
+    방향은 원을 n등분해 구간 안에서 균등 추출, 거리도 범위를 n등분해 같은 방식.
+    방향과 거리는 따로 섞어 서로 독립이 되게 한다.
+    """
+    step = 360.0 / n
+    dirs = [i * step + rng.random() * step for i in range(n)]
+    lo, hi = DISTANCE_RANGE_PX
+    d_step = (hi - lo) / n
+    dists = [lo + i * d_step + rng.random() * d_step for i in range(n)]
+    rng.shuffle(dirs)
+    rng.shuffle(dists)
+    return [(r1(d), r1(t)) for d, t in zip(dirs, dists)]
 
 
 def fake_trajectory(sx, sy, cx, cy, rt_ms, n_samples, rng):
@@ -91,9 +92,9 @@ def fake_trajectory(sx, sy, cx, cy, rt_ms, n_samples, rng):
     return pts
 
 
-def make_trial(index, main_index, warmup, block, size_px, deg, bias, sigma, rng,
+def make_trial(index, main_index, warmup, block, size_px, deg, dist, bias, sigma, rng,
                vw, vh, n_samples, no_response_rate, t0_epoch):
-    sx, sy, tx, ty = layout(size_px, deg, vw, vh)[:4]
+    sx, sy, tx, ty = layout(size_px, deg, dist, vw, vh, rng)
     tx, ty = r1(tx), r1(ty)
 
     rt = max(180, int(rng.gauss(620, 130)))
@@ -128,7 +129,7 @@ def make_trial(index, main_index, warmup, block, size_px, deg, bias, sigma, rng,
         "button_size_px": size_px,
         "target": {"x": tx, "y": ty},
         "start": {"x": r1(sx), "y": r1(sy)},
-        "start_shifted": layout(size_px, deg, vw, vh)[4],
+        "distance_px": dist,
         "t_start_click": t0_epoch - 300,
         "t_target_shown": t0_epoch,
         "t_click": t_click,
@@ -153,8 +154,8 @@ def build_main(pid, bias, args, rng):
     epoch = int(datetime.datetime.now().timestamp() * 1000)
     idx = 0
 
-    for deg in balanced(DIRECTIONS_DEG, args.warmup, rng):
-        trials.append(make_trial(idx, None, True, None, args.button_size, deg, bias,
+    for deg, dist in stratified_geometry(args.warmup, rng):
+        trials.append(make_trial(idx, None, True, None, args.button_size, deg, dist, bias,
                                  args.sigma, rng, vw, vh, args.trajectory_samples,
                                  args.no_response_rate, epoch + idx * 1200))
         idx += 1
@@ -163,8 +164,8 @@ def build_main(pid, bias, args, rng):
     n_blocks = args.main // block_size
     main_index = 0
     for b in range(n_blocks):
-        for deg in balanced(DIRECTIONS_DEG, block_size, rng):
-            trials.append(make_trial(idx, main_index, False, b, args.button_size, deg, bias,
+        for deg, dist in stratified_geometry(block_size, rng):
+            trials.append(make_trial(idx, main_index, False, b, args.button_size, deg, dist, bias,
                                      args.sigma, rng, vw, vh, args.trajectory_samples,
                                      args.no_response_rate, epoch + idx * 1200))
             idx += 1
@@ -182,8 +183,9 @@ def envelope(pid, mode, trials, args, extra_config):
     vw, vh = args.viewport
     now = datetime.datetime.now().isoformat()
     config = {
-        "distance_px": DISTANCE_PX,
-        "directions_deg": DIRECTIONS_DEG,
+        "distance_range_px": DISTANCE_RANGE_PX,
+        "geometry_sampling": "per-trial stratified random: direction over the full circle, "
+                             "distance over distance_range_px, start point uniform in the feasible area",
         "time_limit_ms": TIME_LIMIT_MS,
         "response_cap_ms": RESPONSE_CAP_MS,
         "inter_trial_blank_ms": 200,

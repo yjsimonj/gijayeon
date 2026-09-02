@@ -31,9 +31,10 @@
 
   const SCHEMA_VERSION = '3.0';
 
-  // §4.1 고정 조건
-  const DISTANCE_PX = 450;
-  const DIRECTIONS_DEG = [0, 90, 180, 270];
+  // 이동 거리는 시행마다 이 범위에서 층화 무작위로 뽑는다 (buildSpecs 주석 참고).
+  // 하한 250px: 그보다 짧으면 이동이 거의 없어 재려는 편향이 생기지 않는다.
+  // 상한 500px: §7의 최소 창(1200×800)에서 세로 방향까지 배치되는 한계.
+  const DISTANCE_RANGE_PX = [250, 500];
   const TIME_LIMIT_MS = 750;      // 초과 시 timeout 플래그만. 시행은 유지(§4.3)
   const RESPONSE_CAP_MS = 3000;   // 이때까지 무클릭이면 no_response
   const INTER_TRIAL_BLANK_MS = 200;
@@ -126,30 +127,44 @@
   /* ---------------------- 2. 시행 스펙 ---------------------- */
 
   /**
-   * 워밍업 20 + 본시행 600 (§4.2).
+   * 워밍업 20 + 본시행 600. 방향·거리·시작위치를 시행마다 새로 뽑는다.
    *
-   * 방향은 100회 블록마다 4방향을 25회씩 균등 배분하고 블록 안에서만 섞는다.
-   * 600회를 통째로 섞으면 앞 400(학습)과 뒤 200(평가)의 방향 구성이 우연히
-   * 달라질 수 있다. §6은 학습 벡터를 평가 시행에 그대로 적용하므로, 두 구간의
-   * 방향 구성이 어긋나면 "개인 편향"이 아니라 "방향 구성 차이"를 재게 된다.
+   * 고정하지 않는 이유는 검정력이 아니라 타당도다. 목표가 화면상 정해진 몇 곳에만
+   * 나오면 학습 400회와 평가 200회가 **같은 기하를 공유**하고, 그러면 "이 사람의
+   * 편향"과 "그 지점들의 특성"을 갈라낼 방법이 설계 안에 없다. 매 시행 새 위치면
+   * 벡터를 여러 위치에서 추정해 한 번도 쓰지 않은 위치에 적용하게 된다.
+   *
+   * 검정력은 손해를 보지 않는다. §6이 추정하는 것은 학습 시행 전체를 평균한 전역
+   * 벡터 하나(파라미터 2개)이고 그 표준오차는 σ/√400 이다 — 칸이 몇 개인지와
+   * 무관하다. 칸당 시행 수가 문제가 되는 것은 칸별로 따로 적합할 때뿐이다.
+   *
+   * 편향이 화면 좌표 고정 오프셋인지 이동 방향에 딸린 것인지는 아직 모른다. 방향을
+   * 균등하게 깔면 화면 좌표계에서 방향 의존 성분이 상쇄되므로, 방향을 몇 개로
+   * 고정하는 것은 "고정 오프셋이 지배적"이라는 검증 안 된 가정을 코드에 박는 일이
+   * 된다. 방향·거리를 시행마다 기록해 두면 어느 쪽인지는 나중에 데이터가 답한다.
+   *
+   * 다만 층화해서 뽑는다(블록마다 원을 균등 분할, 거리도 균등 분할). 완전 무작위면
+   * 앞 400과 뒤 200의 방향·거리 구성이 우연히 어긋날 수 있고, §6은 학습 벡터를
+   * 평가 시행에 그대로 적용하므로 그 경우 "개인 편향"이 아니라 "구성 차이"를 재게
+   * 된다. 층화는 그 위험만 없애고 무작위성은 유지한다.
    */
   function buildSpecs(buttonSizePx) {
     const specs = [];
-
-    balanced(DIRECTIONS_DEG, COUNTS.warmup).forEach((deg) => {
-      specs.push({ size: buttonSizePx, direction: deg, warmup: true, mainIndex: null, block: null });
+    const mk = (g, warmup, mainIndex, block) => ({
+      size: buttonSizePx, direction: g.direction, distance: g.distance,
+      warmup, mainIndex, block,
     });
+
+    stratifiedGeometry(COUNTS.warmup).forEach((g) => specs.push(mk(g, true, null, null)));
 
     const blockSize = COUNTS.main % COUNTS.restEvery === 0 ? COUNTS.restEvery : COUNTS.main;
     const nBlocks = Math.round(COUNTS.main / blockSize);
     let mainIndex = 0;
     for (let b = 0; b < nBlocks; b++) {
-      balanced(DIRECTIONS_DEG, blockSize).forEach((deg) => {
-        specs.push({ size: buttonSizePx, direction: deg, warmup: false, mainIndex: mainIndex++, block: b });
-      });
+      stratifiedGeometry(blockSize).forEach((g) => specs.push(mk(g, false, mainIndex++, b)));
     }
 
-    // 학습/평가 구분은 참가자에게 알리지 않고 화면상 표시도 없다 (§4.2).
+    // 학습/평가 구분은 참가자에게 알리지 않고 화면상 표시도 없다.
     // 멈추는 곳은 워밍업 종료와 100회 휴식뿐이다.
     specs.forEach((sp) => {
       if (sp.warmup) return;
@@ -159,19 +174,39 @@
     return specs;
   }
 
+  /**
+   * n개 시행의 (방향, 거리)를 층화 무작위로 뽑는다.
+   *
+   * 방향은 원을 n등분한 뒤 각 구간 안에서 균등 추출한다 — 어느 방향도 비지 않고
+   * 두 시행이 같은 각도를 갖지도 않는다. 거리도 같은 방식으로 범위를 n등분한다.
+   * 방향과 거리는 따로 섞어 서로 독립이 되게 한다(같이 섞으면 "먼 목표는 항상
+   * 오른쪽" 같은 상관이 남아 둘을 갈라낼 수 없다).
+   */
+  function stratifiedGeometry(n) {
+    const step = 360 / n;
+    const dirs = shuffle(Array.from({ length: n }, (_, i) => i * step + Math.random() * step));
+    const [dLo, dHi] = DISTANCE_RANGE_PX;
+    const dStep = (dHi - dLo) / n;
+    const dists = shuffle(Array.from({ length: n }, (_, i) => dLo + i * dStep + Math.random() * dStep));
+    return dirs.map((direction, i) => ({ direction: r1(direction), distance: r1(dists[i]) }));
+  }
+
   /* ---------------------- 3. 배치 계산 ---------------------- */
 
   /**
-   * 시작 버튼은 화면 중앙(§4.3)이 기본이지만, 그대로 두면 세로 방향 시행이 화면을
-   * 벗어난다: 900px 높이에서 중앙 450 − 450 = 0, 800px면 −50이다. 거리 450px과
-   * 4방향은 분석의 뼈대라 건드릴 수 없으므로, 시작 버튼을 해당 축으로 필요한
-   * 최소량만 민다(1440×900에서 ±14px). 밀렸는지는 start_shifted 로 기록한다.
-   * 배치가 아예 불가능하면 null.
+   * 시작 버튼과 목표가 **둘 다 화면에 들어오는 영역 안에서 시작점을 무작위로** 뽑는다.
+   *
+   * 시작 버튼을 화면 중앙에 고정하는 것은 애초에 불가능했다 — 높이 900px에서 중앙
+   * 450 − 450 = 0 이라 위쪽 목표가 화면에 걸린다. 이전 판은 필요한 최소량만 밀었는데,
+   * 그러면 방향 하나에 위치 하나가 대응해 목표가 화면상 몇 곳에만 나왔다. 시작점을
+   * 무작위로 뽑으면 그 문제와 "학습·평가가 같은 기하" 문제가 함께 사라진다.
+   *
+   * 영역이 비면(그 거리·방향을 이 화면에 놓을 수 없으면) null.
    */
-  function computeLayout(sizePx, directionDeg, vw, vh) {
+  function computeLayout(sizePx, directionDeg, distancePx, vw, vh) {
     const rad = (directionDeg * Math.PI) / 180;
-    const vx = Math.cos(rad) * DISTANCE_PX;
-    const vy = -Math.sin(rad) * DISTANCE_PX;   // 90° = 위
+    const vx = Math.cos(rad) * distancePx;
+    const vy = -Math.sin(rad) * distancePx;   // 90° = 위
 
     const sr = START_BUTTON_SIZE_PX / 2;
     const tr = sizePx / 2;
@@ -183,34 +218,28 @@
     const yMax = vh - Math.max(sr, tr + vy) - EDGE_PADDING_PX;
     if (xMin > xMax || yMin > yMax) return null;
 
-    const wantX = vw / 2;
-    const wantY = (TOP_CLEARANCE_PX + vh) / 2;
-    const startX = clamp(wantX, xMin, xMax);
-    const startY = clamp(wantY, yMin, yMax);
+    const startX = xMin + Math.random() * (xMax - xMin);
+    const startY = yMin + Math.random() * (yMax - yMin);
 
-    return {
-      startX, startY,
-      targetX: startX + vx,
-      targetY: startY + vy,
-      shifted: Math.abs(startX - wantX) > 0.5 || Math.abs(startY - wantY) > 0.5,
-    };
+    return { startX, startY, targetX: startX + vx, targetY: startY + vy };
   }
 
   /** 시작 전에 모든 시행이 실제로 표시 가능한지 확인한다. */
   function allTrialsFit(specs) {
     const bad = specs.filter((sp) =>
-      computeLayout(sp.size, sp.direction, window.innerWidth, window.innerHeight) === null);
+      computeLayout(sp.size, sp.direction, sp.distance, window.innerWidth, window.innerHeight) === null);
     if (bad.length === 0) return null;
+    const longest = Math.max.apply(null, specs.map((sp) => sp.distance));
     return `화면이 너무 작아 ${bad.length}개 시행을 표시할 수 없습니다 ` +
-           `(뷰포트 ${window.innerWidth}×${window.innerHeight}, 이동거리 ${DISTANCE_PX}px, ` +
+           `(뷰포트 ${window.innerWidth}×${window.innerHeight}, 최대 이동거리 ${longest.toFixed(0)}px, ` +
            `버튼 ${specs[0].size}px). 더 큰 화면이나 낮은 디스플레이 배율에서 실행하세요.`;
   }
 
   /* ---------------------- 4. 한 시행 (§4.3) ---------------------- */
 
   /**
-   * 1. 화면 중앙에 시작 버튼(30px) → 2. 클릭(커서 시작 위치 확정)
-   * 3. 450px 떨어진 4방향 중 하나에 목표 등장(t0) → 4. 이동·클릭
+   * 1. 가능 영역 안 무작위 위치에 시작 버튼(30px) → 2. 클릭(커서 시작 위치 확정)
+   * 3. 이 시행에 뽑힌 방향·거리로 목표 등장(t0) → 4. 이동·클릭
    * 5. 기록 → 6. 200ms 공백
    *
    * resolve({ record })         정상 종료 (무응답 포함)
@@ -225,7 +254,8 @@
       // 렌더링할 때만 stageRect를 빼서 stage 로컬 좌표로 바꾼다. 이 변환을 빼먹으면
       // 기록된 목표 중심과 클릭 좌표가 어긋나 맞은 클릭도 전부 미스로 남는다.
       const stageRect = stage.getBoundingClientRect();
-      const layout = computeLayout(spec.size, spec.direction, window.innerWidth, window.innerHeight);
+      const layout = computeLayout(spec.size, spec.direction, spec.distance,
+                                   window.innerWidth, window.innerHeight);
 
       // 시작 전에 전부 확인했으므로, 여기서 null이면 세션 도중에 뷰포트가 줄어든
       // 것이다(전체화면 해제·해상도 변경). 그냥 진행하면 화면 밖 목표를 "실패한
@@ -233,6 +263,7 @@
       if (!layout) {
         logEvent('layout_infeasible', {
           trial_index: trialIndex, size: spec.size, direction: spec.direction,
+          distance: spec.distance,
           inner_width: window.innerWidth, inner_height: window.innerHeight,
         });
         showFullscreenLost(() => resolve({ aborted: true }));
@@ -424,7 +455,7 @@
           button_size_px: spec.size,
           target: { x: targetX, y: targetY },
           start: { x: r1(layout.startX), y: r1(layout.startY) },
-          start_shifted: layout.shifted,
+          distance_px: spec.distance,
           t_start_click: tStartClickEpoch,
           t_target_shown: tShownEpoch,
           t_click: tClickEpoch,
@@ -544,8 +575,9 @@
       },
       config: {
         button_size_px: S.buttonSizePx,
-        distance_px: DISTANCE_PX,
-        directions_deg: DIRECTIONS_DEG,
+        distance_range_px: DISTANCE_RANGE_PX,
+        geometry_sampling: 'per-trial stratified random: direction over the full circle, '
+          + 'distance over distance_range_px, start point uniform in the feasible area',
         time_limit_ms: TIME_LIMIT_MS,
         response_cap_ms: RESPONSE_CAP_MS,
         inter_trial_blank_ms: INTER_TRIAL_BLANK_MS,
@@ -702,8 +734,9 @@
 
   function bind() {
     $('mx-build-line').textContent =
-      `워밍업 ${COUNTS.warmup} + 본시행 ${COUNTS.main}회 · 거리 ${DISTANCE_PX}px · ` +
-      `4방향 · 제한 ${TIME_LIMIT_MS}ms · ${COUNTS.restEvery}회마다 휴식` +
+      `워밍업 ${COUNTS.warmup} + 본시행 ${COUNTS.main}회 · ` +
+      `거리 ${DISTANCE_RANGE_PX[0]}~${DISTANCE_RANGE_PX[1]}px·방향·위치 매 시행 무작위 · ` +
+      `제한 ${TIME_LIMIT_MS}ms · ${COUNTS.restEvery}회마다 휴식` +
       (DEV_MODE ? ' · ⚠ dev=1 축소 모드 (본실험에 쓰지 말 것)' : '');
     $('mx-button-size').value = DEFAULT_BUTTON_SIZE_PX;
 
@@ -766,9 +799,9 @@
     version: SCHEMA_VERSION,
     devMode: DEV_MODE,
     _internal: {
-      COUNTS, DIRECTIONS_DEG, DISTANCE_PX, START_BUTTON_SIZE_PX,
+      COUNTS, DISTANCE_RANGE_PX, START_BUTTON_SIZE_PX,
       TOP_CLEARANCE_PX, EDGE_PADDING_PX, TIME_LIMIT_MS,
-      balanced, buildSpecs, computeLayout,
+      balanced, buildSpecs, computeLayout, stratifiedGeometry,
     },
   };
 })();
