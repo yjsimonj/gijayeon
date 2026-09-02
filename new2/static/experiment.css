@@ -2,7 +2,7 @@
  * 마우스 보정 실험 v3 — 스타일
  *
  * 이 파일은 두 곳에서 쓰인다.
- *  1) static/index.html   — 로컬 실행(A안). <link>로 로드.
+ *  1) 로컬 index.html   — <link>로 로드.
  *  2) app.py 의 Gradio head — <style> 로 인라인 주입.
  *
  * 그래서 html/body 전역을 함부로 건드리지 않는다. Gradio 페이지 레이아웃과
@@ -11,16 +11,46 @@
  *
  * 실험 진행 화면은 position:fixed 로 뷰포트를 통째로 덮으므로, 바깥 컨테이너가
  * Gradio든 소박한 index.html이든 동일하게 동작한다.
+ *
+ * ── 색은 요소마다 못박는다 (상속에 맡기지 않는다) ──────────────────────
+ *
+ * #mx-app 에 color 를 한 번 주는 것으로는 자손 글자색이 정해지지 않는다. CSS에서
+ * 상속은 "직접 매칭되는 규칙이 없을 때"만 쓰이고, 어떤 직접 규칙에도 진다. Gradio
+ * 다크 테마는 h1·h2·p·label 같은 맨 요소에 color 규칙을 직접 걸기 때문에, 상속에
+ * 맡긴 글자는 전부 그 값(다크 테마에서는 흰색에 가까운 색)을 쓴다. 그러면 흰
+ * 패널 위에 흰 글씨가 되어 읽을 수 없다 — 실제로 겪었다.
+ *
+ * 그래서 아래는 텍스트 색을 요소별로, #mx-app 접두사(ID 우선순위)와 !important 로
+ * 못박는다. 참가자가 OS·브라우저 테마를 어떻게 두었든 같은 화면을 보는 것은 취향
+ * 문제가 아니라 통제 사항이다(계획서 §7). 실험 진행 화면(#mx-stage)이 이미 밝은
+ * 회색으로 고정이므로 설정·완료 화면도 같은 밝은 계열로 고정한다.
  * ===================================================================== */
 
 #mx-app, #mx-app * { box-sizing: border-box; }
 
 #mx-app {
-  font-family: -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
+  /* 네이티브 폼 컨트롤(숫자 입력 스피너 등)까지 밝은 쪽으로 그리게 한다 */
+  color-scheme: light;
+  background: #f4f5f7;
   color: #1f2430;
+  padding: 8px 0;
+  border-radius: 12px;
+  font-family: -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
   user-select: none;
   -webkit-user-select: none;
 }
+
+/* 기본 글자색 — 여기부터가 다크 테마 방어 */
+#mx-app h1,
+#mx-app h2,
+#mx-app p,
+#mx-app label,
+#mx-app div,
+#mx-app span,
+#mx-app li,
+#mx-app strong,
+#mx-app b,
+#mx-app code { color: #1f2430 !important; }
 
 body.mx-standalone {
   margin: 0;
@@ -33,10 +63,10 @@ body.mx-running {
   overflow: hidden !important;
 }
 
-.mx-screen { display: none; }
-.mx-screen.active { display: block; }
+#mx-app .mx-screen { display: none; }
+#mx-app .mx-screen.active { display: block; }
 
-.mx-panel {
+#mx-app .mx-panel {
   max-width: 760px;
   margin: 28px auto;
   padding: 24px 32px;
@@ -49,10 +79,8 @@ body.mx-running {
 #mx-app h2 { font-size: 16px; margin: 20px 0 8px; }
 #mx-app p { margin: 6px 0; font-size: 14px; line-height: 1.55; }
 
-.mx-field { margin-bottom: 18px; }
-.mx-field > label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 14px; }
-.mx-radio label { display: block; font-weight: 400; margin: 4px 0; font-size: 14px; }
-.mx-inline label { display: inline-block; margin-right: 18px; font-weight: 400; font-size: 14px; }
+#mx-app .mx-field { margin-bottom: 18px; }
+#mx-app .mx-field > label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 14px; }
 
 #mx-app input[type="text"],
 #mx-app input[type="number"] {
@@ -60,28 +88,35 @@ body.mx-running {
   font-size: 14px;
   border: 1px solid #d1d5db;
   border-radius: 6px;
-  background: #fff;
-  color: #1f2430;
+  background: #fff !important;
+  color: #1f2430 !important;
 }
 #mx-app input[type="text"] { width: 260px; }
 #mx-app input[type="number"] { width: 110px; }
+#mx-app input::placeholder { color: #9ca3af !important; opacity: 1; }
 
-.mx-hint { font-size: 12px; color: #6b7280; margin-top: 4px; }
-.mx-warn { font-size: 13px; color: #b45309; margin-top: 6px; }
-.mx-bad { font-size: 13px; color: #b91c1c; margin-top: 6px; }
-.mx-ok { color: #15803d; }
+/* 보조 문구 — div/span 기본색보다 우선순위가 높아야 하므로 클래스로 잡는다
+   (#mx-app .mx-hint = ID+클래스 > #mx-app div = ID+요소) */
+#mx-app .mx-hint, #mx-app .mx-hint code { color: #6b7280 !important; font-size: 12px; margin-top: 4px; }
+#mx-app .mx-warn { color: #b45309 !important; font-size: 13px; margin-top: 6px; }
+#mx-app .mx-bad  { color: #b91c1c !important; font-size: 13px; margin-top: 6px; }
+#mx-app .mx-ok   { color: #15803d !important; }
 
 #mx-app button {
   padding: 8px 16px;
   font-size: 14px;
   border: 1px solid #d1d5db;
   border-radius: 6px;
-  background: #fff;
-  color: #1f2430;
+  background: #fff !important;
+  color: #1f2430 !important;
   cursor: pointer;
 }
 #mx-app button:disabled { opacity: 0.45; cursor: not-allowed; }
-#mx-app button.mx-primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+#mx-app button.mx-primary {
+  background: #2563eb !important;
+  color: #fff !important;
+  border-color: #2563eb;
+}
 #mx-app button.mx-big { padding: 12px 22px; font-size: 16px; }
 
 #mx-app table { border-collapse: collapse; width: 100%; margin: 10px 0; }
@@ -90,11 +125,12 @@ body.mx-running {
   padding: 6px 10px;
   text-align: right;
   font-size: 13px;
+  color: #1f2430 !important;
 }
 #mx-app th:first-child, #mx-app td:first-child { text-align: left; }
 
-.mx-hidden { display: none !important; }
-.mx-sep { border: none; border-top: 1px solid #e5e7eb; margin: 22px 0; }
+#mx-app .mx-hidden { display: none !important; }
+#mx-app .mx-sep { border: none; border-top: 1px solid #e5e7eb; margin: 22px 0; }
 
 /* ---------------- 진행 화면 ---------------- */
 
@@ -124,29 +160,37 @@ body.mx-running {
 }
 #mx-timebar-fill.mx-overtime { background: #dc2626; }
 
-.mx-stim {
+/* 자극(시작·목표 버튼). 배경색이 테마에 흔들리면 목표가 안 보일 수 있으므로
+   여기도 못박는다 — 이 두 원의 대비가 실험 과제 자체다. */
+#mx-app .mx-stim {
   position: absolute;
   border-radius: 50%;
-  background: #cbd5e1;
-  border: 2px solid #64748b;
+  background: #cbd5e1 !important;
+  border: 2px solid #64748b !important;
 }
-.mx-stim.mx-target {
-  background: #2563eb;
-  border-color: #1d4ed8;
+#mx-app .mx-stim.mx-target {
+  background: #2563eb !important;
+  border-color: #1d4ed8 !important;
 }
 
-.mx-overlay {
+/* 오버레이는 어두운 배경 위 흰 글씨다. 위의 기본 글자색(#mx-app div 등)에
+   덮이지 않도록 클래스 우선순위로 다시 잡는다. */
+#mx-app .mx-overlay {
   position: fixed;
   inset: 0;
   background: rgba(15, 18, 25, 0.94);
-  color: #fff;
+  color: #fff !important;
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 100;
   text-align: center;
 }
-.mx-overlay .mx-box { max-width: 520px; padding: 0 24px; }
-.mx-overlay h2 { font-size: 22px; color: #fff; }
-.mx-overlay p { color: #e5e7eb; }
-.mx-overlay .mx-count { font-size: 15px; color: #9ca3af; }
+#mx-app .mx-overlay,
+#mx-app .mx-overlay div,
+#mx-app .mx-overlay span,
+#mx-app .mx-overlay h2 { color: #fff !important; }
+#mx-app .mx-overlay .mx-box { max-width: 520px; padding: 0 24px; }
+#mx-app .mx-overlay h2 { font-size: 22px; }
+#mx-app .mx-overlay p { color: #e5e7eb !important; }
+#mx-app .mx-overlay .mx-count { font-size: 15px; color: #9ca3af !important; }

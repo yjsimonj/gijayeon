@@ -258,12 +258,17 @@ new2/
 
 ```powershell
 cd c:\Lab\gijayoun\new2
-node tools/selftest.mjs          # 47개 — 시퀀스·기하·스키마 정합
+node tools/selftest.mjs          # 63개 — 시퀀스·기하·스키마·CSS 정합
 python tools/test_app_save.py    # 41개 — 저장·업로드·ZeroGPU·오류 처리
 ```
 
 `selftest.mjs` 는 **experiment.js / make_dummy.py / analyze.py 세 파일의 시행 레코드
 키가 일치하는지** 본다 — 한쪽만 고치면 실험을 다 하고 나서 분석이 안 도는 사고가 난다.
+
+글자색을 요소별로 못박아 뒀는지도 본다. Gradio 다크 테마는 `h1`·`p`·`label` 같은 맨
+요소에 `color` 를 직접 걸고, CSS 상속은 어떤 직접 규칙에도 지므로 `#mx-app` 에 색을
+한 번 주는 것으로는 자손 글자색이 정해지지 않는다 — 흰 패널에 흰 글씨가 되어 설정
+화면을 읽을 수 없었다. 색 규칙을 걷어내면 이 검사가 잡는다.
 
 분석을 미리 돌려보려면(계획서 §8-3):
 

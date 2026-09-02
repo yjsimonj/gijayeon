@@ -246,7 +246,15 @@ def save(payload: str):
 # 통로용 컴포넌트를 감추는 방식에 주의. visible=False 로 만들면 Gradio 버전에 따라
 # DOM에 아예 렌더링되지 않을 수 있고, 그러면 JS가 #payload 를 못 찾아 조용히 저장이
 # 안 된다. 컴포넌트는 살려 두고 CSS로만 감춘다 — DOM에는 반드시 있어야 한다.
-BRIDGE_CSS = "#payload, #trigger { display: none !important; }"
+#
+# 페이지 배경도 여기서 밝은 쪽으로 고정한다. Gradio가 시스템 테마를 따라 다크로
+# 그리면 실험 화면(밝은 회색 고정)과 바깥이 어긋나 보이고, 무엇보다 참가자마다
+# 다른 화면을 보게 된다 — 통제 사항이다(계획서 §7). 이 규칙만 Gradio 전용이라
+# static/experiment.css 가 아니라 여기에 둔다(그 파일은 로컬 index.html 에서도 쓴다).
+BRIDGE_CSS = (
+    "#payload, #trigger { display: none !important; }"
+    "body, gradio-app, .gradio-container { background: #f4f5f7 !important; }"
+)
 
 HEAD = f"<style>{CSS}{BRIDGE_CSS}</style><script>{JS}</script>"
 

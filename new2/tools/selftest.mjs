@@ -10,6 +10,8 @@
  *   3) 배치 기하: 거리 450px 고정, 시작·목표 원이 화면 안 (§4.1, §4.3)
  *   4) 스키마 정합: experiment.js 의 시행 레코드 키와 analysis/make_dummy.py 가
  *      만드는 키가 같은가 — 한쪽만 고치면 실험 다 하고 분석이 안 도는 사고가 난다
+ *   5) CSS 다크 테마 방어: 글자색을 요소별로 못박았는가 — 상속에 맡기면 Gradio
+ *      다크 테마에서 흰 패널에 흰 글씨가 된다
  * ===================================================================== */
 
 import { readFileSync } from 'node:fs';
@@ -229,6 +231,55 @@ for (const k of ['main_index', 'no_response', 'button_size_px', 'error_x', 'erro
   ok(anSrc.includes(`"${k}"`), `analyze.py 가 ${k} 를 참조`);
 }
 ok(anSrc.includes('rec["cx"] - offset[0]'), 'analyze.py 의 보정은 빼기(−) ← 부호 규약 §5');
+
+/* ------------------------ 5. CSS 다크 테마 방어 ------------------------ */
+
+// Gradio 다크 테마는 h1·p·label 같은 맨 요소에 color 를 직접 건다. CSS 상속은
+// 어떤 직접 규칙에도 지므로 #mx-app 에 color 를 한 번 주는 것으로는 자손 글자색이
+// 정해지지 않는다 — 흰 패널에 흰 글씨가 되어 설정 화면을 읽을 수 없었다.
+// 요소별로 못박은 규칙이 남아 있는지 여기서 지킨다.
+
+console.log('\n[5] CSS 다크 테마 방어 (흰 패널에 흰 글씨 재발 방지)');
+const cssSrc = readSource(join(ROOT, 'static', 'experiment.css'));
+
+// 선택자 목록만 뽑는다 (선언 블록 안의 색 값과 섞이지 않게)
+const selectors = cssSrc
+  .replace(/\/\*[\s\S]*?\*\//g, '')          // 주석 제거
+  .split('}')
+  .map((chunk) => chunk.split('{')[0].trim())
+  .filter(Boolean);
+const hasSelector = (needle) => selectors.some((s) => s.includes(needle));
+
+ok(/#mx-app\s*\{[^}]*color-scheme:\s*light/.test(cssSrc),
+  '#mx-app 에 color-scheme: light (네이티브 폼 컨트롤까지 밝게)');
+
+for (const el of ['h1', 'h2', 'p', 'label', 'div', 'span', 'code']) {
+  ok(hasSelector(`#mx-app ${el}`), `#mx-app ${el} 에 색을 직접 지정`);
+}
+
+// 색 선언은 !important 여야 한다. Gradio 규칙이 !important 를 쓰는 경우까지 이긴다.
+const textBlock = cssSrc.match(/#mx-app h1,[\s\S]*?\}/);
+ok(textBlock !== null && /!important/.test(textBlock[0]),
+  '기본 글자색 선언이 !important');
+
+// 보조 문구는 #mx-app div 보다 우선순위가 높아야 한다 (ID+클래스 > ID+요소)
+for (const cls of ['.mx-hint', '.mx-warn', '.mx-bad']) {
+  ok(hasSelector(`#mx-app ${cls}`), `${cls} 도 #mx-app 접두사로 지정`);
+}
+
+// 오버레이는 어두운 배경 위 흰 글씨 — 위의 기본 글자색에 덮이면 안 된다
+ok(hasSelector('#mx-app .mx-overlay div'), '오버레이 안 글자색을 다시 흰색으로 잡음');
+ok(/#mx-app \.mx-overlay p \{[^}]*#e5e7eb\s*!important/.test(cssSrc),
+  '오버레이 본문은 밝은 회색 유지');
+
+// 자극(원)의 대비는 실험 과제 자체다
+ok(/#mx-app \.mx-stim\.mx-target \{[^}]*background:\s*#2563eb\s*!important/.test(cssSrc),
+  '목표 버튼 색이 테마에 흔들리지 않게 못박음');
+
+// Gradio 전용 규칙은 app.py 쪽에 있어야 한다 (experiment.css 는 로컬에서도 쓴다)
+const appSrc = readSource(join(ROOT, 'app.py'));
+ok(/gradio-app|\.gradio-container/.test(appSrc) && !/gradio-container/.test(cssSrc),
+  'Gradio 전용 배경 규칙은 app.py 에만 (experiment.css 는 프레임워크 중립)');
 
 /* --------------------------------- 결과 --------------------------------- */
 
