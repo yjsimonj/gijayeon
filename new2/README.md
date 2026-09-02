@@ -64,9 +64,30 @@ data/main_<참가자ID>_<시각>.json
 
 | | |
 |---|---|
-| Space | https://huggingface.co/spaces/yjsimonj/gijayeon |
+| **참가자에게 줄 주소** | **https://yjsimonj-gijayeon.hf.space/** |
+| 점검용 축소 모드(24시행) | https://yjsimonj-gijayeon.hf.space/?dev=1 |
+| Space 관리 페이지 | https://huggingface.co/spaces/yjsimonj/gijayeon |
 | Dataset (private) | https://huggingface.co/datasets/yjsimonj/mouse-exp-data |
 | 코드 | https://github.com/yjsimonj/gijayeon → `new2/` |
+
+### 주소 세 개 중 어느 것을 쓰나
+
+| 주소 | 상태 |
+|---|---|
+| `yjsimonj-gijayeon.hf.space` | ✅ 앱이 직접 서빙된다. **이걸 쓴다** |
+| `huggingface.co/spaces/yjsimonj/gijayeon` | 관리·로그용. 앱을 iframe으로 감싼 페이지다 |
+| `yjsimonj-gijayeon.static.hf.space` | ❌ **404** |
+
+`.static.hf.space` 는 **Static Space 전용 도메인**이다. 이 Space를 한때 `new2/static` 만
+올리는 Static Space로 배포하려 했던 이력이 있어(커밋 `c7e678b`) 그 도메인이 Space
+메타데이터에 남아 있는데, 지금 SDK는 `gradio` 라서 그 도메인 뒤에는 서빙할 정적 빌드가
+없다. Space 정보에 `stage: READY` 로 보이지만 "예약돼 있다"는 뜻일 뿐이다.
+
+**참가자에게는 `huggingface.co/spaces/...` 가 아니라 `hf.space` 주소를 준다.** 관리
+페이지의 iframe은 `allow="... fullscreen ..."` 를 달고 있어 앱이 시작을 막지는 않지만,
+그때 전체화면이 되는 것은 브라우저 창이 아니라 iframe이다. 이 연구는 클릭 좌표가
+1~2px 단위로 의미를 갖고 뷰포트 기준이 어긋나면 데이터가 조용히 오염되므로(§7),
+감싸는 층을 하나 없애는 쪽이 맞다.
 
 **Space 파일시스템은 재시작하면 초기화된다**(§2). Space는 놀리면 자고, 코드를 고치면
 재빌드되고, 가끔 알아서 재시작한다. 그래서 원격 수집에서는 `data/` 를 믿을 수 없고
