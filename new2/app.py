@@ -140,10 +140,12 @@ _GRADIO_MAJOR = int(str(gr.__version__).split(".")[0])
 _BLOCKS_KWARGS = {} if _GRADIO_MAJOR >= 6 else {"head": HEAD}
 _LAUNCH_KWARGS = {"head": HEAD} if _GRADIO_MAJOR >= 6 else {}
 
-# SSR(Node 프록시)은 이 앱에 아무 이득이 없는데, Gradio 6의 SSR 경로에서 프로세스가
-# launch 직후 종료되는 문제를 겪었다("Stopping Node.js server..." 후 RUNTIME_ERROR).
-# 실험 화면은 순수 정적 HTML/JS라 서버 렌더링이 필요 없으므로 끈다.
-if _GRADIO_MAJOR >= 5:
+# SSR(ssr_mode)은 건드리지 않는다. HF Space는 Gradio 6 앱을 SSR(Node 프록시) 경로로
+# 프록시하므로, 끄면 플랫폼 쪽 연결이 어긋나 RUNTIME_ERROR가 된다(실제로 겪었다).
+# launch 직후 프로세스가 죽던 것은 SSR 때문이 아니라 launch()가 블록하지 않기
+# 때문이었다 — main() 아래에서 붙잡는다.
+_ENV_SSR = os.environ.get("GRADIO_SSR_MODE", "").strip().lower()
+if _ENV_SSR in ("0", "false", "off"):
     _LAUNCH_KWARGS["ssr_mode"] = False
 
 with gr.Blocks(title="마우스 보정 실험", **_BLOCKS_KWARGS) as demo:
