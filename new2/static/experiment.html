@@ -61,6 +61,22 @@
       </div>
 
       <div class="mx-field">
+        <label>서버 자동 저장 (선택)</label>
+        <div class="mx-hint">
+          Dataset repo에 결과를 바로 올립니다. <b>연구자가 이 브라우저에서 한 번만</b> 입력하면
+          이후 계속 쓰입니다(이 브라우저에만 저장되고 페이지 소스에는 들어가지 않습니다).
+          비워두면 다운로드만 씁니다.
+        </div>
+        <p>
+          <input type="text" id="mx-hf-repo" placeholder="계정/mouse-exp-data" autocomplete="off">
+          <input type="password" id="mx-hf-token" placeholder="hf_... (write 토큰)" autocomplete="off">
+          <button id="mx-hf-save">기억</button>
+          <button id="mx-hf-clear">지우기</button>
+        </p>
+        <div class="mx-hint" id="mx-hf-status">설정 안 됨 — 다운로드만 사용</div>
+      </div>
+
+      <div class="mx-field">
         <label>환경 점검 (계획서 §7)</label>
         <table>
           <thead><tr><th>검사</th><th>측정값</th><th>기준</th><th>판정</th></tr></thead>

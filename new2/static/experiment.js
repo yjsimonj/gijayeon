@@ -712,6 +712,101 @@
     };
   }
 
+  /* ---- 서버 자동 저장: 브라우저에서 HF Dataset repo로 직접 커밋 ----
+   *
+   * Gradio Space(계획서 §3)는 PRO 전용이라 서버를 둘 수 없다. 대신 HF Hub API가
+   * Space 오리진에 CORS를 열어 주므로(확인: preupload/commit 모두 허용), 정적
+   * 페이지에서 곧바로 커밋할 수 있다. 서버 없이 §3의 자동 저장을 되살린 것.
+   *
+   * 토큰은 페이지에 박지 않는다 — 공개 페이지 소스에 토큰이 들어가면 누구나
+   * 그 repo를 읽고 쓸 수 있다. 연구자가 설정 화면에서 한 번 입력하고 그 브라우저의
+   * localStorage 에만 둔다. 되도록 이 Dataset repo에만 write 권한이 있는
+   * fine-grained 토큰을 쓸 것.
+   */
+  const HF_TOKEN_KEY = 'mxexp:hf_token';
+  const HF_REPO_KEY = 'mxexp:hf_repo';
+
+  /**
+   * 참가자마다 토큰을 입력받을 수는 없다. 그래서 연구자가 주소에 붙여 배포한다:
+   *   .../?hf_repo=계정/mouse-exp-data&hf_token=hf_xxx
+   * 페이지가 열리면 곧바로 localStorage 로 옮기고 주소에서 지운다(화면·기록에
+   * 토큰이 남지 않게). 그 브라우저는 이후 링크 없이도 자동 저장된다.
+   * 페이지 소스에는 토큰이 없으므로 링크를 받은 사람만 쓸 수 있다.
+   */
+  function adoptConfigFromUrl() {
+    const repo = params.get('hf_repo');
+    const token = params.get('hf_token');
+    if (!repo && !token) return;
+    try {
+      if (repo) localStorage.setItem(HF_REPO_KEY, repo);
+      if (token) localStorage.setItem(HF_TOKEN_KEY, token);
+    } catch (e) { /* 사생활 보호 모드 등 — 다운로드 경로로 넘어간다 */ }
+    try {
+      const url = new URL(location.href);
+      url.searchParams.delete('hf_repo');
+      url.searchParams.delete('hf_token');
+      history.replaceState(null, '', url.toString());
+    } catch (e) { /* 무시 */ }
+  }
+
+  function hfConfig() {
+    try {
+      const token = localStorage.getItem(HF_TOKEN_KEY);
+      const repo = localStorage.getItem(HF_REPO_KEY);
+      return token && repo ? { token, repo } : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function toBase64(str) {
+    const bytes = new TextEncoder().encode(str);
+    let bin = '';
+    const CHUNK = 0x8000;   // 한 번에 다 넘기면 인자 개수 제한에 걸린다
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+    }
+    return btoa(bin);
+  }
+
+  async function uploadToDataset(payload, filename) {
+    const cfg = hfConfig();
+    if (!cfg) return { sent: false, reason: 'not-configured' };
+
+    const body =
+      JSON.stringify({
+        key: 'header',
+        value: { summary: `${payload.mode} ${payload.participant_id} (${payload.trials.length}시행)` },
+      }) + '\n' +
+      JSON.stringify({
+        key: 'file',
+        value: {
+          path: `raw/${filename}`,
+          content: toBase64(JSON.stringify(payload)),
+          encoding: 'base64',
+        },
+      }) + '\n';
+
+    try {
+      const res = await fetch(`https://huggingface.co/api/datasets/${cfg.repo}/commit/main`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${cfg.token}`,
+          'Content-Type': 'application/x-ndjson',
+        },
+        body,
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        return { sent: false, reason: `HTTP ${res.status} ${text.slice(0, 200)}` };
+      }
+      return { sent: true, repo: cfg.repo, path: `raw/${filename}` };
+    } catch (e) {
+      // 네트워크 끊김·토큰 오류 무엇이든 여기서 끝낸다. 다운로드 버튼이 보험이다(§3.4).
+      return { sent: false, reason: e.message };
+    }
+  }
+
   /**
    * §3.3 JS → 파이썬 전달.
    * box.value = ... 로 직접 넣으면 프레임워크가 변경을 감지하지 못해 파이썬으로
@@ -835,8 +930,9 @@
     const filename = `${payload.mode}_${payload.participant_id}_${stamp}.json`;
     S.lastFilename = filename;
 
-    const sub = submitResults(payload);            // 서버 저장 시도 (있으면)
+    const sub = submitResults(payload);                  // Gradio 껍데기가 있으면 그쪽으로
     const backup = backupToStorage(payload, filename);   // 브라우저 백업
+    const up = await uploadToDataset(payload, filename); // 정적 배포에서의 자동 저장
 
     showScreen('mx-screen-done');
     $('mx-done-title').textContent = MODE_LABEL[payload.mode] + (payload.aborted ? ' — 중단됨' : ' 완료');
@@ -863,9 +959,15 @@
     `;
 
     const parts = [];
-    if (sub.sent) parts.push('서버로 전송했습니다. 아래 Gradio 상태 메시지에서 업로드 결과를 확인하세요.');
-    else if (sub.reason === 'local') parts.push('로컬 실행 모드입니다(서버 저장 없음). 아래 버튼으로 파일을 받아 두세요.');
-    else parts.push('서버 전송 실패: ' + sub.reason + ' — 아래 버튼으로 파일을 반드시 받아 두세요.');
+    if (up.sent) {
+      parts.push(`✅ 서버 저장 완료 — <code>${up.repo}/${up.path}</code>`);
+    } else if (up.reason === 'not-configured') {
+      if (sub.sent) parts.push('서버로 전송했습니다. 아래 Gradio 상태 메시지에서 업로드 결과를 확인하세요.');
+      else if (sub.reason === 'local') parts.push('자동 저장이 설정되지 않았습니다 — <b>아래 버튼으로 파일을 받아 연구자에게 전달하세요.</b>');
+      else parts.push('서버 전송 실패: ' + sub.reason + ' — 아래 버튼으로 파일을 반드시 받아 두세요.');
+    } else {
+      parts.push('⚠ 서버 저장 실패: ' + up.reason + ' — <b>아래 버튼으로 파일을 반드시 받아 두세요.</b>');
+    }
     if (backup.ok) parts.push(backup.stripped
       ? '브라우저 백업 저장됨 (용량 초과로 궤적은 제외).'
       : '브라우저 백업 저장됨.');
@@ -1079,6 +1181,48 @@
       if (!document.fullscreenElement && $('mx-screen-setup').classList.contains('active')) refreshSetup();
     });
 
+    // ---- 서버 자동 저장 설정 (토큰은 이 브라우저에만 저장된다) ----
+    function refreshHfStatus() {
+      const cfg = hfConfig();
+      $('mx-hf-status').innerHTML = cfg
+        ? `✅ 자동 저장 켜짐 — <code>${cfg.repo}</code> (토큰 저장됨, 이 브라우저에만)`
+        : '설정 안 됨 — 다운로드만 사용';
+      if (cfg) $('mx-hf-repo').value = cfg.repo;
+    }
+
+    $('mx-hf-save').addEventListener('click', () => {
+      const repo = $('mx-hf-repo').value.trim();
+      const token = $('mx-hf-token').value.trim();
+      if (!/^[^/\s]+\/[^/\s]+$/.test(repo)) {
+        alert('Dataset repo를 "계정/이름" 형식으로 입력하세요.');
+        return;
+      }
+      if (!token) {
+        alert('토큰을 입력하세요.');
+        return;
+      }
+      try {
+        localStorage.setItem(HF_REPO_KEY, repo);
+        localStorage.setItem(HF_TOKEN_KEY, token);
+      } catch (e) {
+        alert('브라우저 저장 실패: ' + e.message);
+        return;
+      }
+      $('mx-hf-token').value = '';
+      refreshHfStatus();
+    });
+
+    $('mx-hf-clear').addEventListener('click', () => {
+      try {
+        localStorage.removeItem(HF_REPO_KEY);
+        localStorage.removeItem(HF_TOKEN_KEY);
+      } catch (e) { /* 무시 */ }
+      $('mx-hf-token').value = '';
+      refreshHfStatus();
+    });
+
+    refreshHfStatus();
+
     $('mx-start').addEventListener('click', startRun);
 
     $('mx-fs-reenter').addEventListener('click', async () => {
@@ -1167,6 +1311,7 @@
     if (!$('mx-app') || !$('mx-start')) return false;
     if (window.__mxMounted) return true;
     window.__mxMounted = true;
+    adoptConfigFromUrl();
     bind();
     return true;
   }

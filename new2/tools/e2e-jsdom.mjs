@@ -75,7 +75,8 @@ const dom = new JSDOM(
      <button id="trigger"></button>
    </body></html>`,
   {
-    url: `http://localhost/${FULL ? '' : '?dev=1'}`,
+    // 주소로 자동 저장 설정을 넘기는 경로(연구자가 배포하는 링크 형태)도 함께 시험한다
+    url: `http://localhost/?${FULL ? '' : 'dev=1&'}hf_repo=yjsimonj%2Fmouse-exp-data&hf_token=hf_url_token`,
     runScripts: 'outside-only',
     pretendToBeVisual: true,
   }
@@ -125,6 +126,19 @@ document.getElementById('trigger').addEventListener('click', () => {
   received = document.querySelector('#payload textarea').value;
 });
 
+// HF Dataset 직접 커밋(정적 배포의 자동 저장)을 가로채 검사한다
+const uploads = [];
+window.fetch = async (url, opts = {}) => {
+  uploads.push({ url: String(url), opts });
+  return {
+    ok: true, status: 200,
+    text: async () => '{"success":true}',
+    json: async () => ({ success: true }),
+  };
+};
+window.TextEncoder = globalThis.TextEncoder;
+window.btoa = globalThis.btoa;
+
 /* ------------------------------ 앱 로드 ------------------------------ */
 
 window.eval(js);   // runScripts:'outside-only' 이므로 DOM 안의 <script>는 실행되지 않는다
@@ -148,6 +162,21 @@ setValue($('mx-student-id'), '20231234');
 ok($('mx-start').disabled && $('mx-start-blocked').textContent.includes('이름'),
   '이름이 비어 있으면 막고 이유를 알려준다');
 setValue($('mx-name'), '홍길동');
+
+// 주소로 넘어온 자동 저장 설정 (연구자가 뿌리는 링크)
+ok($('mx-hf-status').textContent.includes('자동 저장 켜짐'),
+  '주소의 hf_repo·hf_token 이 자동 저장 설정으로 채택됨', $('mx-hf-status').textContent);
+ok(!window.location.search.includes('hf_token'), '토큰이 주소에서 즉시 제거됨',
+  window.location.search);
+ok(!document.getElementById('mx-app').innerHTML.includes('hf_url_token'),
+  '토큰이 페이지 DOM에 남지 않음');
+
+// 설정 화면에서 직접 입력하는 경로도 동작해야 한다
+setValue($('mx-hf-repo'), 'yjsimonj/mouse-exp-data');
+setValue($('mx-hf-token'), 'hf_e2e_dummy_token');
+$('mx-hf-save').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+ok($('mx-hf-token').value === '', '토큰 입력칸은 저장 후 비워짐');
+
 setValue($('mx-participant-id'), 'P 03!');
 ok($('mx-start').disabled && $('mx-start-blocked').textContent.includes('P03'),
   '쓸 수 없는 문자가 있으면 정리된 ID를 알려주고 막는다', $('mx-start-blocked').textContent);
@@ -396,6 +425,26 @@ if (data) {
   ok(data.environment.inner_width === VW && data.environment.inner_height === VH,
     'environment 에 뷰포트 기록');
   ok(data.environment.input_device === 'mouse', 'environment 에 입력 장치 기록');
+}
+
+// 자동 저장 (HF Dataset 직접 커밋)
+const commit = uploads.find((u) => u.url.includes('/api/datasets/') && u.url.includes('/commit/'));
+ok(!!commit, 'Dataset 커밋 API 호출됨', uploads.map((u) => u.url).join(', '));
+if (commit) {
+  ok(commit.url === 'https://huggingface.co/api/datasets/yjsimonj/mouse-exp-data/commit/main',
+    '커밋 URL이 설정한 repo를 가리킴', commit.url);
+  ok(commit.opts.headers.Authorization === 'Bearer hf_e2e_dummy_token', '토큰이 헤더로 전달됨');
+  ok(commit.opts.headers['Content-Type'] === 'application/x-ndjson', 'NDJSON 본문');
+  const lines = String(commit.opts.body).trim().split('\n').map(JSON.parse);
+  ok(lines[0].key === 'header' && lines[1].key === 'file', 'header + file 두 줄');
+  ok(lines[1].value.path.startsWith('raw/main_E2E01_'), 'raw/<모드>_<ID>_<시각>.json 경로',
+    lines[1].value.path);
+  ok(lines[1].value.encoding === 'base64', 'base64 인코딩');
+  const decoded = JSON.parse(Buffer.from(lines[1].value.content, 'base64').toString('utf-8'));
+  ok(decoded.participant_id === 'E2E01' && decoded.trials.length === data.trials.length,
+    '올린 내용이 실제 결과와 같음');
+  ok(decoded.participant.name === '홍길동', '올린 내용에 학번·이름 포함');
+  ok($('mx-save-status').textContent.includes('서버 저장 완료'), '완료 화면에 저장 성공 표시');
 }
 
 // 완료 화면 다운로드 버튼
