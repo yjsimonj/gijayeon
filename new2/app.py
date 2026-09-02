@@ -139,6 +139,12 @@ _GRADIO_MAJOR = int(str(gr.__version__).split(".")[0])
 _BLOCKS_KWARGS = {} if _GRADIO_MAJOR >= 6 else {"head": HEAD}
 _LAUNCH_KWARGS = {"head": HEAD} if _GRADIO_MAJOR >= 6 else {}
 
+# SSR(Node 프록시)은 이 앱에 아무 이득이 없는데, Gradio 6의 SSR 경로에서 프로세스가
+# launch 직후 종료되는 문제를 겪었다("Stopping Node.js server..." 후 RUNTIME_ERROR).
+# 실험 화면은 순수 정적 HTML/JS라 서버 렌더링이 필요 없으므로 끈다.
+if _GRADIO_MAJOR >= 5:
+    _LAUNCH_KWARGS["ssr_mode"] = False
+
 with gr.Blocks(title="마우스 보정 실험", **_BLOCKS_KWARGS) as demo:
     gr.HTML(HTML)
 
@@ -149,5 +155,15 @@ with gr.Blocks(title="마우스 보정 실험", **_BLOCKS_KWARGS) as demo:
 
     trigger.click(save, inputs=payload, outputs=status)
 
-if __name__ == "__main__":
+def main():
     demo.launch(**_LAUNCH_KWARGS)
+    # launch()가 블록하지 않고 곧바로 반환하는 조합에서는 여기서 프로세스가 끝나
+    # Space가 RUNTIME_ERROR로 죽는다. 그 경우를 대비해 명시적으로 붙잡아 둔다.
+    try:
+        demo.block_thread()
+    except (AttributeError, KeyboardInterrupt, OSError):
+        pass
+
+
+if __name__ == "__main__":
+    main()
