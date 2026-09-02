@@ -19,7 +19,6 @@
 사용법
   python make_dummy.py --out ../data_dummy                     # 8명, 개인차 있음
   python make_dummy.py --out ../data_dummy_nopersonal --individual-sd 0
-  python make_dummy.py --out ../data_dummy --mode sizing --participants 3
 """
 
 from __future__ import annotations
@@ -37,7 +36,6 @@ DIRECTIONS_DEG = [0, 90, 180, 270]
 TIME_LIMIT_MS = 750
 RESPONSE_CAP_MS = 3000
 START_BUTTON_SIZE_PX = 30
-CANDIDATE_SIZES_PX = [8, 12, 16, 24, 32]
 TOP_CLEARANCE_PX = 14
 EDGE_PADDING_PX = 8
 
@@ -174,43 +172,9 @@ def build_main(pid, bias, args, rng):
 
     return envelope(pid, "main", trials, args, extra_config={
         "button_size_px": args.button_size,
-        "candidate_sizes_px": None,
         "warmup_trials": args.warmup,
         "main_trials": args.main,
         "train_split": args.train_split,
-    })
-
-
-def build_sizing(pid, bias, args, rng):
-    vw, vh = args.viewport
-    trials = []
-    epoch = int(datetime.datetime.now().timestamp() * 1000)
-    idx = 0
-
-    warm_sizes = balanced(CANDIDATE_SIZES_PX, args.sizing_warmup, rng)
-    warm_dirs = balanced(DIRECTIONS_DEG, args.sizing_warmup, rng)
-    for size, deg in zip(warm_sizes, warm_dirs):
-        trials.append(make_trial(idx, None, True, None, size, deg, bias, args.sigma, rng,
-                                 vw, vh, args.trajectory_samples, args.no_response_rate,
-                                 epoch + idx * 1200))
-        idx += 1
-
-    total = len(CANDIDATE_SIZES_PX) * args.sizing_per_size
-    sizes = balanced(CANDIDATE_SIZES_PX, total, rng)
-    dirs = balanced(DIRECTIONS_DEG, total, rng)
-    for i in range(total):
-        trials.append(make_trial(idx, i, False, 0, sizes[i], dirs[i], bias, args.sigma, rng,
-                                 vw, vh, args.trajectory_samples, args.no_response_rate,
-                                 epoch + idx * 1200))
-        idx += 1
-
-    return envelope(pid, "sizing", trials, args, extra_config={
-        "button_size_px": None,
-        "candidate_sizes_px": CANDIDATE_SIZES_PX,
-        "warmup_trials": args.sizing_warmup,
-        "main_trials": total,
-        "train_split": None,
-        "sizing_target_success_rate": 0.65,
     })
 
 
@@ -257,7 +221,6 @@ def envelope(pid, mode, trials, args, extra_config):
 def main(argv=None):
     ap = argparse.ArgumentParser(description="더미 데이터 생성 (§8-3 분석 사전 점검용)")
     ap.add_argument("--out", required=True, help="저장 폴더")
-    ap.add_argument("--mode", choices=["main", "sizing"], default="main")
     ap.add_argument("--participants", type=int, default=8)
     ap.add_argument("--button-size", type=float, default=12)
     ap.add_argument("--sigma", type=float, default=4.0, help="축별 클릭 잡음 SD(px)")
@@ -269,8 +232,6 @@ def main(argv=None):
     ap.add_argument("--main", type=int, default=600)
     ap.add_argument("--train-split", type=int, default=400)
     ap.add_argument("--rest-every", type=int, default=100)
-    ap.add_argument("--sizing-warmup", type=int, default=10)
-    ap.add_argument("--sizing-per-size", type=int, default=20)
     ap.add_argument("--trajectory-samples", type=int, default=8,
                     help="더미 궤적 샘플 수. 실제는 약 75개지만 분석에 쓰지 않으므로 짧게 만든다")
     ap.add_argument("--no-response-rate", type=float, default=0.002)
@@ -286,9 +247,9 @@ def main(argv=None):
         pid = f"D{i + 1:02d}"
         bias = (args.common_bias[0] + rng.gauss(0, args.individual_sd),
                 args.common_bias[1] + rng.gauss(0, args.individual_sd))
-        data = build_main(pid, bias, args, rng) if args.mode == "main" else build_sizing(pid, bias, args, rng)
+        data = build_main(pid, bias, args, rng)
         stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + f"_{i:02d}"
-        path = os.path.join(args.out, f"{args.mode}_{pid}_{stamp}.json")
+        path = os.path.join(args.out, f"main_{pid}_{stamp}.json")
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
         size_mb = os.path.getsize(path) / (1024 * 1024)
@@ -297,10 +258,7 @@ def main(argv=None):
               f"trials={len(data['trials'])}  {size_mb:.2f} MB  → {os.path.basename(path)}")
 
     print(f"\n{len(made)}개 파일 생성: {os.path.abspath(args.out)}")
-    if args.mode == "main":
-        print("다음: python analyze.py " + args.out)
-    else:
-        print("다음: 실험 앱의 '모드 A 결과 집계' 화면에서 이 파일들을 전부 선택")
+    print("다음: python analyze.py " + args.out)
     return 0
 
 
