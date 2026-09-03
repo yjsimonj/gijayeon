@@ -129,8 +129,13 @@ eq(test.length, I.COUNTS.main - I.COUNTS.trainSplit, `평가 구간 ${I.COUNTS.m
 ok(new Set(main.map((s) => s.direction)).size > main.length * 0.8,
   `방향이 수백 종 (4종 고정이 아님)`,
   `${new Set(main.map((s) => s.direction)).size}종 / ${main.length}시행`);
-ok(new Set(main.map((s) => `${s.direction}@${s.distance}`)).size === main.length,
-  '(방향, 거리) 조합은 하나도 겹치지 않는다');
+// 완전 일치를 요구하면 안 된다. 방향 3600값 · 거리 2500값으로 반올림하므로 600시행
+// 이면 둘 다 우연히 같은 쌍이 약 2% 확률로 생긴다(생일문제) — 실제로 40회 중 1회
+// 걸렸다. 게다가 시작점은 따로 뽑으므로 그 경우에도 기하는 다르다. 재려는 것은
+// "같은 조합이 반복 사용되지 않는가" 이므로 거의 전부 고유하면 된다.
+const pairs = new Set(main.map((s) => `${s.direction}@${s.distance}`)).size;
+ok(pairs >= main.length - 3, '(방향, 거리) 조합이 거의 전부 고유 (반올림 충돌 3개까지 허용)',
+  `${pairs}종 / ${main.length}시행`);
 
 // 층화 추출이면 방향 합벡터가 0에 가깝다 = 어느 방향으로도 치우치지 않았다
 for (const [label, list] of [['본시행 전체', main], ['학습 구간', train], ['평가 구간', test]]) {
@@ -253,7 +258,7 @@ const TRIAL_KEYS = [
   'target', 'start', 'distance_px', 't_start_click', 't_target_shown', 't_click',
   'click', 'rt_ms', 'timeout', 'no_response', 'success', 'error_x', 'error_y',
   'trajectory', 'sample_interval_median_ms', 'trajectory_span_ms',
-  'n_trajectory_samples', 'drag_rejected',
+  'n_trajectory_samples', 'drag_rejected', 'stray_rejected',
 ];
 
 function keysFromBlock(text, startMarker, endMarker, keyRegex) {

@@ -215,6 +215,11 @@ while (!$('mx-screen-done').classList.contains('active')) {
       continue;
     }
 
+    // 사람처럼 잠깐 걸려서 클릭한다. 즉시 클릭하면 experiment.js 의 "사람이 낼 수
+    // 없는 속도" 방어(MIN_PLAUSIBLE_RT_MS)에 걸려 전부 폐기된다 — 그 방어가 살아
+    // 있는지도 여기서 함께 확인되는 셈이다.
+    await sleep(200);
+
     // 목표로 접근하는 궤적 + 살짝 어긋난 클릭 (편향 +1.5, −1.0 px)
     for (const f of [0.5, 0.8, 0.95]) dispatchMouse('mousemove', c.x * f, c.y * f);
     const cx = c.x + 1.5;

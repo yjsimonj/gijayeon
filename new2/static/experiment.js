@@ -43,6 +43,14 @@
 
   // 실행 세부
   const DRAG_THRESHOLD_PX = 50;   // mousedown~mouseup 이 이보다 멀면 드래그 → 폐기하고 계속 대기
+
+  // 시작 버튼을 두 번 누르면(더블클릭·바운스) 두 번째 클릭이 목표 클릭으로 기록된다.
+  // 첫 시험 데이터에서 실제로 한 번 나왔다: rt 52ms, 클릭이 시작점에서 4.9px, 목표
+  // 오차 292px. 그 한 시행이 σ 추정을 6px → 24.7px 로 부풀려 편향 벡터를 통째로
+  // 망가뜨렸다. 목표는 최소 250px 떨어져 있으므로 아래 두 조건은 정상 클릭을 지우지
+  // 않는다 — 걸리면 폐기하고 계속 기다린다(시행은 끝나지 않는다).
+  const STRAY_NEAR_START_PX = 10;  // 시작 버튼 반지름에 더할 여유
+  const MIN_PLAUSIBLE_RT_MS = 150; // 250px 이상 조준 이동의 생리적 하한보다 한참 아래
   const EDGE_PADDING_PX = 8;
   const TOP_CLEARANCE_PX = 14;    // 시간바(5px) + 여유
 
@@ -62,6 +70,7 @@
     abortRequested: false,
     lastPayload: null,
     lastFilename: null,
+    envAtStart: null,   // 전체화면 상태의 뷰포트. 끝난 뒤에 재면 창 크기가 잡힌다
   };
 
   /* ---------------------- 1. 유틸리티 ---------------------- */
@@ -275,6 +284,7 @@
       let latest = null;
       let pendingDown = null;
       let dragRejected = 0;
+      let strayRejected = 0;
       let softFired = false;
       let finished = false;
       let paused = false;
@@ -338,6 +348,19 @@
         if (paused || phase !== 'await-click' || e.button !== 0 || !pendingDown) return;
         if (dist(pendingDown.x, pendingDown.y, e.clientX, e.clientY) > DRAG_THRESHOLD_PX) {
           dragRejected++;       // 드래그로 간주 — 폐기하고 계속 대기(시행은 안 끝남)
+          pendingDown = null;
+          return;
+        }
+        // 시작 버튼 자리에서 난 클릭이거나 사람이 낼 수 없는 속도면 목표 클릭이 아니다
+        const nearStart = dist(pendingDown.x, pendingDown.y, layout.startX, layout.startY)
+          <= START_BUTTON_SIZE_PX / 2 + STRAY_NEAR_START_PX;
+        const tooFast = (pendingDown.perf - tShownPerf) < MIN_PLAUSIBLE_RT_MS;
+        if (nearStart || tooFast) {
+          strayRejected++;
+          logEvent('stray_click', {
+            trial_index: trialIndex, near_start: nearStart, too_fast: tooFast,
+            rt_ms: Math.round(pendingDown.perf - tShownPerf),
+          });
           pendingDown = null;
           return;
         }
@@ -473,6 +496,7 @@
           trajectory_span_ms: ts.length ? ts[ts.length - 1] - ts[0] : 0,
           n_trajectory_samples: trajectory.length,
           drag_rejected: dragRejected,
+          stray_rejected: strayRejected,
         };
 
         resolve({ record });
@@ -524,7 +548,18 @@
     S.events = [];
     S.abortRequested = false;
     S.startedAt = new Date().toISOString();
-    logEvent('session_start', { dev_mode: DEV_MODE, n_specs: specs.length });
+    // 시행이 도는 동안의 뷰포트를 여기서 찍어 둔다. finishSession()이 전체화면을
+    // 나간 뒤에 재면 창 크기가 기록되어(실측 1440×765) §7의 창 크기·전체화면 조건을
+    // 나중에 검증할 수 없다 — 좌표는 전부 전체화면 기준으로 수집됐는데도.
+    S.envAtStart = {
+      inner_width: window.innerWidth,
+      inner_height: window.innerHeight,
+      fullscreen: !!document.fullscreenElement,
+    };
+    logEvent('session_start', {
+      dev_mode: DEV_MODE, n_specs: specs.length,
+      inner_width: S.envAtStart.inner_width, inner_height: S.envAtStart.inner_height,
+    });
 
     let i = 0;
     while (i < specs.length && !S.abortRequested) {
@@ -564,12 +599,16 @@
       finished_at: new Date().toISOString(),
       aborted: S.abortRequested,
       environment: {
-        inner_width: window.innerWidth,
-        inner_height: window.innerHeight,
+        // 시행이 도는 동안의 값 (전체화면). 좌표가 이 기준으로 수집됐다.
+        inner_width: (S.envAtStart || {}).inner_width || window.innerWidth,
+        inner_height: (S.envAtStart || {}).inner_height || window.innerHeight,
+        fullscreen: (S.envAtStart || {}).fullscreen === true,
+        // 끝난 뒤 값. 전체화면을 이미 나왔으므로 보통 창 크기가 잡힌다.
+        inner_width_at_finish: window.innerWidth,
+        inner_height_at_finish: window.innerHeight,
         screen_width: window.screen.width,
         screen_height: window.screen.height,
         device_pixel_ratio: window.devicePixelRatio || 1,
-        fullscreen: !!document.fullscreenElement,
         user_agent: navigator.userAgent,
         platform: navigator.platform || null,
       },

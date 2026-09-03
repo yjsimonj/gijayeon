@@ -145,6 +145,7 @@ def make_trial(index, main_index, warmup, block, size_px, deg, dist, bias, sigma
         "trajectory_span_ms": traj[-1][0] - traj[0][0] if traj else 0,
         "n_trajectory_samples": len(traj),
         "drag_rejected": 0,
+        "stray_rejected": 0,
     }
 
 
@@ -211,6 +212,8 @@ def envelope(pid, mode, trials, args, extra_config):
             "input_device": "mouse",
             "zoom_estimate": 1.0,
             "fullscreen": True,
+            "inner_width_at_finish": vw,
+            "inner_height_at_finish": vh,
             "user_agent": "make_dummy.py",
             "platform": "dummy",
         },
