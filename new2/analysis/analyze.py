@@ -163,7 +163,12 @@ def load_participant(path, warnings):
 #
 # v 도 종단 속도가 아니라 **최대 속도**를 쓴다. 오버슛 크기를 정하는 것은 멈추기
 # 직전 속도가 아니라 탄도 국면에서 얼마나 빨리 왔는가다.
-THETA_PATH_PX = 20.0       # θ 를 정의하는 이동 경로 길이
+# 창 길이를 20/50/100/200/400px·전체경로로 훑어 참 이동 방향과의 각도 차를 재봤다.
+# 20px 는 중앙값 25~46° 로 틀리고, 목표에 한참 못 미쳐 클릭한 참가자에게는 100° 까지
+# 벌어진다 — 마지막 20px 가 접근이 아니라 목표 위에서의 미세 조정이기 때문이다.
+# 100px 면 10~21° 로 줄고, 그 참가자의 궤적 설명력이 0.4% → 32.5% 로 살아난다.
+# 분석 대상 6명의 결과는 어느 창에서도 같았다(중앙값 0.34~0.41%).
+THETA_PATH_PX = 100.0      # θ 를 정의하는 이동 경로 길이
 MIN_DISP_PX = 1.0          # 이보다 덜 움직였으면 방향을 신뢰하지 않는다
 
 
@@ -246,6 +251,7 @@ def ridge_cv(X, Y, lams, k=5, seed=0):
 
 
 RIDGE_LAMBDAS = (0.01, 0.1, 1.0, 10.0, 100.0, 1000.0)
+N_PERMUTATIONS = 200       # 섞기 검정 반복 수. p 의 하한이 1/(N+1) 이 된다.
 
 
 def fit_participant_model(train_recs, test_recs):
@@ -269,6 +275,19 @@ def fit_participant_model(train_recs, test_recs):
     sse_model = float(((Yte - pred_te) ** 2).sum())
     sse_const = float(((Yte - base) ** 2).sum())
     sse_zero = float((Yte ** 2).sum())
+
+    # 궤적 몫이 진짜 신호인지 섞기 검정으로 본다. 특징 행을 오차와 무관하게 섞으면
+    # 관계가 파괴되므로, 그렇게 만든 분포보다 실제 값이 크지 않으면 그 설명력은
+    # 방향 때문이 아니라 파라미터를 맞춘 탓이다. λ 는 실제 적합에서 고른 값을 쓴다.
+    real_share = (sse_const - sse_model) / sse_zero if sse_zero > 0 else 0.0
+    rng = np.random.default_rng(0)
+    null = []
+    for _ in range(N_PERMUTATIONS):
+        c_, b_ = ridge_fit(Xtr[rng.permutation(len(Xtr))], Ytr, lam)
+        sse_n = float(((Yte - (Xte @ c_ + b_)) ** 2).sum())
+        null.append((sse_const - sse_n) / sse_zero)
+    null = np.asarray(null)
+    p_perm = float((np.sum(null >= real_share) + 1) / (len(null) + 1))
     return {
         "offsets": pred_te,
         "lambda": lam,
@@ -279,7 +298,9 @@ def fit_participant_model(train_recs, test_recs):
         #   상수 몫 = 절편만으로, 즉 조건 C 가 번 몫
         #   궤적 몫 = 그 위에 궤적 항이 더한 몫
         "r2_const_share": 1.0 - sse_const / sse_zero if sse_zero > 0 else 0.0,
-        "r2_traj_share": (sse_const - sse_model) / sse_zero if sse_zero > 0 else 0.0,
+        "r2_traj_share": real_share,
+        "traj_null_p95": float(np.percentile(null, 95)),
+        "traj_perm_p": p_perm,
         "coef": coef.tolist(),
         "intercept": intercept.tolist(),
         "n_bad_theta": sum(1 for r in train_recs + test_recs if not r.get("theta_ok", True)),
@@ -402,6 +423,8 @@ def analyze(participants, alpha=0.05):
             models[p_.pid] = {"offsets": np.zeros((len(p_.test), 2)), "error": f"{type(exc).__name__}: {exc}",
                               "lambda": None, "cv_r2_train": None,
                               "r2_test_vs_zero": None, "r2_test_vs_const": None,
+                              "r2_const_share": None, "r2_traj_share": None,
+                              "traj_null_p95": None, "traj_perm_p": None,
                               "coef": None, "intercept": None, "n_bad_theta": None}
 
     usable_conditions = list(CONDITIONS) if n_p >= 2 else ["A", "C", "D"]
@@ -588,9 +611,11 @@ def decide_d(posthoc, per_participant, used):
 
     # 설명력을 상수 몫과 궤적 몫으로 가른다. D 가 이겼더라도 그 이득이 절편(=상수
     # 보정)에서 온 것인지 궤적에서 온 것인지는 유의성만으로 알 수 없다.
-    shares = [(pp["ridge"].get("r2_const_share"), pp["ridge"].get("r2_traj_share"))
+    shares = [(pp["ridge"].get("r2_const_share"), pp["ridge"].get("r2_traj_share"),
+               pp["ridge"].get("traj_perm_p"))
               for pp in per_participant if pp.get("ridge", {}).get("r2_const_share") is not None]
-    n_traj_wins = sum(1 for c, t in shares if t > c)
+    n_traj_wins = sum(1 for c, t, _ in shares if t > c)
+    n_perm_sig = sum(1 for _, _, pv in shares if pv is not None and pv < 0.05)
 
     parts = []
     if d_gt_a:
@@ -615,10 +640,12 @@ def decide_d(posthoc, per_participant, used):
 
     if shares:
         text += (f" 설명력 분해: {len(shares)}명 중 궤적 몫이 상수 몫보다 큰 사람은 "
-                 f"{n_traj_wins}명이다.")
+                 f"{n_traj_wins}명, 섞기 검정에서 궤적 몫이 잡음과 구별되는 사람은 "
+                 f"{n_perm_sig}명이다.")
     return {"code": code, "text": text,
             "d_gt_a": d_gt_a, "d_gt_b": d_gt_b, "d_gt_c": d_gt_c,
-            "n_traj_beats_const": n_traj_wins, "n_with_shares": len(shares)}
+            "n_traj_beats_const": n_traj_wins, "n_with_shares": len(shares),
+            "n_traj_perm_significant": n_perm_sig}
 
 
 # ---------------------------------------------------------------- 보고서 출력
@@ -698,22 +725,24 @@ def print_report(res, warnings, files):
 
     print("\n[6] 조건 D — 궤적 릿지 모델 (참가자별)")
     print("  입력 5개: 1, cosθ, sinθ, v_peak·cosθ, v_peak·sinθ")
-    print("  θ = 클릭 직전 20px 이동 구간의 방향 · v_peak = 전체 이동 중 최대 속력")
+    print(f"  θ = 클릭 직전 {THETA_PATH_PX:.0f}px 이동 구간의 방향 · v_peak = 전체 이동 중 최대 속력")
     print("  둘 다 궤적에서만 뽑는다 — 버튼 좌표는 쓰지 않는다 (명세서 §1.3)")
     print()
-    print(f"  {'ID':<16}{'λ':>8}{'상수 몫':>10}{'궤적 몫':>10}{'= R²(평가)':>12}{'θ 불량':>8}")
+    print(f"  {'ID':<16}{'λ':>8}{'상수 몫':>10}{'궤적 몫':>10}{'섞기 95%':>10}{'p(섞기)':>9}{'판정':>8}")
     for pp in res["per_participant"]:
         r = pp.get("ridge") or {}
-        if r.get("r2_const_share") is None:
+        if r.get("r2_traj_share") is None:
             print(f"  {pp['participant_id']:<16}  적합 실패: {r.get('error')}")
             continue
-        mark = " ←궤적 우세" if r["r2_traj_share"] > r["r2_const_share"] else ""
+        sig = r["traj_perm_p"] < 0.05
         print(f"  {pp['participant_id']:<16}{r['lambda']:>8.2f}{r['r2_const_share']*100:>9.2f}%"
-              f"{r['r2_traj_share']*100:>9.2f}%{r['r2_test_vs_zero']*100:>11.2f}%{r['n_bad_theta']:>8}{mark}")
+              f"{r['r2_traj_share']*100:>9.2f}%{r['traj_null_p95']*100:>9.2f}%"
+              f"{r['traj_perm_p']:>9.3f}{('신호' if sig else '잡음'):>8}")
     print()
     print("  '상수 몫' = 절편만으로 번 몫 (= 조건 C 가 하는 일)")
     print("  '궤적 몫' = 그 위에 궤적 항이 더한 몫. 둘 다 '보정 안 함' 기준이라 더하면 R²(평가)다.")
-    print("  → D 가 이겼더라도 그 이득이 상수에서 왔는지 궤적에서 왔는지는 이 두 열이 가른다.")
+    print("  '섞기'    = 특징 행을 오차와 무관하게 섞어 다시 적합한 분포. 궤적 몫이 이보다")
+    print("              크지 않으면 그 설명력은 방향 때문이 아니라 파라미터를 맞춘 탓이다.")
 
     print("\n[7] 보조 지표")
     for name, t in res["error_distance_paired_tests"].items():
