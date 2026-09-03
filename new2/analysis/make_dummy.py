@@ -93,7 +93,7 @@ def fake_trajectory(sx, sy, cx, cy, rt_ms, n_samples, rng):
 
 
 def make_trial(index, main_index, warmup, block, size_px, deg, dist, bias, sigma, rng,
-               vw, vh, n_samples, no_response_rate, t0_epoch):
+               vw, vh, n_samples, no_response_rate, t0_epoch, traj_bias=0.0):
     sx, sy, tx, ty = layout(size_px, deg, dist, vw, vh, rng)
     tx, ty = r1(tx), r1(ty)
 
@@ -106,8 +106,12 @@ def make_trial(index, main_index, warmup, block, size_px, deg, dist, bias, sigma
         t_click = None
         traj = fake_trajectory(sx, sy, tx, ty, RESPONSE_CAP_MS, n_samples, rng)
     else:
-        cx = tx + bias[0] + rng.gauss(0, sigma)
-        cy = ty + bias[1] + rng.gauss(0, sigma)
+        # 이동 방향으로의 언더슛. 4방향 이상을 균등하게 깔면 화면 좌표계 평균에서
+        # 상쇄되므로 상수 보정(C)은 이걸 못 잡는다. 궤적 모델(D)만 잡을 수 있다.
+        rad = math.radians(deg)
+        ux, uy = math.cos(rad), -math.sin(rad)
+        cx = tx + bias[0] - traj_bias * ux + rng.gauss(0, sigma)
+        cy = ty + bias[1] - traj_bias * uy + rng.gauss(0, sigma)
         click = {"x": r1(cx), "y": r1(cy)}
         rt_ms = rt
         t_click = t0_epoch + rt
@@ -158,7 +162,7 @@ def build_main(pid, bias, args, rng):
     for deg, dist in stratified_geometry(args.warmup, rng):
         trials.append(make_trial(idx, None, True, None, args.button_size, deg, dist, bias,
                                  args.sigma, rng, vw, vh, args.trajectory_samples,
-                                 args.no_response_rate, epoch + idx * 1200))
+                                 args.no_response_rate, epoch + idx * 1200, args.trajectory_bias))
         idx += 1
 
     block_size = args.rest_every if args.main % args.rest_every == 0 else args.main
@@ -168,7 +172,7 @@ def build_main(pid, bias, args, rng):
         for deg, dist in stratified_geometry(block_size, rng):
             trials.append(make_trial(idx, main_index, False, b, args.button_size, deg, dist, bias,
                                      args.sigma, rng, vw, vh, args.trajectory_samples,
-                                     args.no_response_rate, epoch + idx * 1200))
+                                     args.no_response_rate, epoch + idx * 1200, args.trajectory_bias))
             idx += 1
             main_index += 1
 
@@ -202,6 +206,7 @@ def envelope(pid, mode, trials, args, extra_config):
         "participant_id": pid,
         "dev_mode": False,
         "dummy": True,               # 실제 데이터와 절대 섞이지 않게
+        "dummy_trajectory_bias_px": args.trajectory_bias,
         "started_at": now,
         "finished_at": now,
         "aborted": False,
@@ -233,6 +238,9 @@ def main(argv=None):
                     help="전원 공통 편향 (x y). test01의 Δy=-1.28px 관측을 반영한 기본값")
     ap.add_argument("--individual-sd", type=float, default=1.6,
                     help="개인 편향의 축별 SD(px). 0이면 개인차 없음 → C ≈ B 갈래 점검")
+    ap.add_argument("--trajectory-bias", type=float, default=0.0,
+                    help="이동 방향으로의 언더슛 크기(px). 0보다 크면 편향이 방향에 딸리므로 "
+                         "상수 보정(C)은 못 잡고 궤적 모델(D)만 잡을 수 있다 — 조건 D 의 양성 대조군")
     ap.add_argument("--warmup", type=int, default=20)
     ap.add_argument("--main", type=int, default=600)
     ap.add_argument("--train-split", type=int, default=400)

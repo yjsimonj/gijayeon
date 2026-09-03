@@ -34,11 +34,12 @@ from dataclasses import dataclass, field
 import numpy as np
 from scipy import stats
 
-CONDITIONS = ("A", "B", "C")
+CONDITIONS = ("A", "B", "C", "D")
 CONDITION_LABEL = {
     "A": "A 보정 없음",
     "B": "B 남의 편향",
     "C": "C 본인 편향",
+    "D": "D 본인 릿지모델",
 }
 
 
@@ -127,8 +128,12 @@ def load_participant(path, warnings):
             p.n_timeout += 1
 
         size = t.get("button_size_px") or default_size
+        theta, v_peak, theta_ok = trajectory_features(t.get("trajectory"))
         rec = {
             "main_index": mi,
+            "theta": theta,
+            "v_peak": v_peak,
+            "theta_ok": theta_ok,
             "radius": float(size) / 2.0,
             "cx": float(t["click"]["x"]),
             "cy": float(t["click"]["y"]),
@@ -144,6 +149,141 @@ def load_participant(path, warnings):
         (p.train if mi < train_split else p.test).append(rec)
 
     return p
+
+
+# ---------------------------------------------------------------- 조건 D: 궤적 릿지
+
+# 특징을 뽑는 규칙.
+#
+# θ 를 "클릭 직전 몇 ms" 로 잡으면 안 된다. 사람은 목표에 커서를 세운 뒤 클릭하고
+# (정지 시간 중앙값 14~40ms, 90분위 93~139ms), 그래서 마지막 50ms 창은 시행의
+# 48~64% 에서 변위가 정확히 0 이었다. 대신 **거리**로 자른다 — 클릭 지점에서
+# 뒤로 걸어가며 이동 경로가 20px 쌓일 때까지. 정지 구간은 경로가 안 쌓이므로
+# 자동으로 건너뛴다.
+#
+# v 도 종단 속도가 아니라 **최대 속도**를 쓴다. 오버슛 크기를 정하는 것은 멈추기
+# 직전 속도가 아니라 탄도 국면에서 얼마나 빨리 왔는가다.
+THETA_PATH_PX = 20.0       # θ 를 정의하는 이동 경로 길이
+MIN_DISP_PX = 1.0          # 이보다 덜 움직였으면 방향을 신뢰하지 않는다
+
+
+def trajectory_features(traj):
+    """궤적만으로 (θ, v_peak) 을 뽑는다. 버튼 좌표는 쓰지 않는다.
+
+    명세서 §1.3: 추론 시점에 버튼 중심을 알아야 한다면 "이미 아는데 왜 보정하나"
+    라는 비판이 성립한다. 그래서 입력은 궤적뿐이다.
+
+      θ      = 클릭 직전 20px 이동 구간의 방향 (수학 각. 화면 y는 아래로 증가하므로 부호를 뒤집는다)
+      v_peak = 전체 이동 중 최대 속력 (px/ms)
+
+    반환 (theta, v_peak, ok). ok=False 면 방향을 신뢰할 수 없다.
+    """
+    if not traj or len(traj) < 2:
+        return 0.0, 0.0, False
+    a = np.asarray(traj, dtype=float)
+    t, xy = a[:, 0], a[:, 1:]
+
+    # --- θ: 뒤에서부터 경로 길이가 20px 쌓이는 지점까지 ---
+    step = np.hypot(*np.diff(xy, axis=0).T)          # 각 구간 길이
+    i = len(xy) - 1
+    acc = 0.0
+    while i > 0 and acc < THETA_PATH_PX:
+        acc += step[i - 1]
+        i -= 1
+    disp = xy[-1] - xy[i]
+    ok = math.hypot(*disp) >= MIN_DISP_PX
+    theta = math.atan2(-disp[1], disp[0]) if ok else 0.0
+
+    # --- v_peak: 전체 구간의 최대 속력 ---
+    dt = np.diff(t)
+    good = dt >= 1.0                                  # 같은 프레임에 찍힌 중복 표본 제외
+    v_peak = float(np.max(step[good] / dt[good])) if np.any(good) else 0.0
+
+    return theta, v_peak, ok
+
+
+def feature_row(theta, v_peak):
+    """릿지 입력. 절편은 fit 쪽에서 따로 다루므로 여기서는 4개를 돌려준다.
+    전체 5개: 1, cosθ, sinθ, v_peak·cosθ, v_peak·sinθ"""
+    return [math.cos(theta), math.sin(theta), v_peak * math.cos(theta), v_peak * math.sin(theta)]
+
+
+FEATURE_NAMES = ("cosθ", "sinθ", "v_peak·cosθ", "v_peak·sinθ")
+
+
+def ridge_fit(X, Y, lam):
+    """절편은 벌하지 않는 릿지. X (n,p), Y (n,k) → (계수 (p,k), 절편 (k,))."""
+    X = np.asarray(X, float); Y = np.asarray(Y, float)
+    mx, my = X.mean(axis=0), Y.mean(axis=0)
+    sx = X.std(axis=0, ddof=0)
+    sx[sx < 1e-12] = 1.0                     # 상수 열은 그대로 둔다
+    Xs = (X - mx) / sx
+    p = Xs.shape[1]
+    W = np.linalg.solve(Xs.T @ Xs + lam * np.eye(p), Xs.T @ (Y - my))
+    coef = W / sx[:, None]                   # 원 스케일로 되돌린다
+    intercept = my - mx @ coef
+    return coef, intercept
+
+
+def ridge_cv(X, Y, lams, k=5, seed=0):
+    """학습 구간 안에서만 k-겹 교차검증으로 λ 를 고른다. 평가 구간은 건드리지 않는다."""
+    X = np.asarray(X, float); Y = np.asarray(Y, float)
+    n = len(X)
+    idx = np.random.default_rng(seed).permutation(n)
+    folds = np.array_split(idx, k)
+    best, best_lam, best_r2 = float("inf"), lams[0], 0.0
+    for lam in lams:
+        pred = np.empty_like(Y)
+        for f in folds:
+            tr = np.setdiff1d(idx, f)
+            c, b = ridge_fit(X[tr], Y[tr], lam)
+            pred[f] = X[f] @ c + b
+        sse = float(((Y - pred) ** 2).sum())
+        if sse < best:
+            sst = float(((Y - Y.mean(axis=0)) ** 2).sum())
+            best, best_lam, best_r2 = sse, lam, 1.0 - sse / sst if sst > 0 else 0.0
+    return best_lam, best_r2
+
+
+RIDGE_LAMBDAS = (0.01, 0.1, 1.0, 10.0, 100.0, 1000.0)
+
+
+def fit_participant_model(train_recs, test_recs):
+    """참가자 한 명의 궤적 릿지. 학습 구간으로 적합하고 평가 구간 보정량을 예측한다.
+
+    예측 대상은 오차(클릭 − 목표)이고, 보정은 그것을 빼는 것이다 — C와 같은 규약이라
+    A/B/C/D 가 같은 자로 비교된다.
+    """
+    Xtr = np.array([feature_row(r["theta"], r["v_peak"]) for r in train_recs], float)
+    Ytr = np.array([[r["ex"], r["ey"]] for r in train_recs], float)
+    lam, cv_r2 = ridge_cv(Xtr, Ytr, RIDGE_LAMBDAS)
+    coef, intercept = ridge_fit(Xtr, Ytr, lam)
+
+    Xte = np.array([feature_row(r["theta"], r["v_peak"]) for r in test_recs], float)
+    Yte = np.array([[r["ex"], r["ey"]] for r in test_recs], float)
+    pred_te = Xte @ coef + intercept
+
+    # 평가 구간에서의 설명력. 기준선은 "학습 구간 평균 벡터"(= 조건 C) 이다 —
+    # 릿지가 상수 보정보다 나은지를 바로 보여준다.
+    base = Ytr.mean(axis=0)
+    sse_model = float(((Yte - pred_te) ** 2).sum())
+    sse_const = float(((Yte - base) ** 2).sum())
+    sse_zero = float((Yte ** 2).sum())
+    return {
+        "offsets": pred_te,
+        "lambda": lam,
+        "cv_r2_train": cv_r2,
+        "r2_test_vs_zero": 1.0 - sse_model / sse_zero if sse_zero > 0 else 0.0,
+        "r2_test_vs_const": 1.0 - sse_model / sse_const if sse_const > 0 else 0.0,
+        # 설명력을 두 몫으로 가른다 (둘 다 '보정 안 함' 기준이라 더하면 R²(평가)가 된다).
+        #   상수 몫 = 절편만으로, 즉 조건 C 가 번 몫
+        #   궤적 몫 = 그 위에 궤적 항이 더한 몫
+        "r2_const_share": 1.0 - sse_const / sse_zero if sse_zero > 0 else 0.0,
+        "r2_traj_share": (sse_const - sse_model) / sse_zero if sse_zero > 0 else 0.0,
+        "coef": coef.tolist(),
+        "intercept": intercept.tolist(),
+        "n_bad_theta": sum(1 for r in train_recs + test_recs if not r.get("theta_ok", True)),
+    }
 
 
 # ---------------------------------------------------------------- 통계
@@ -251,7 +391,20 @@ def analyze(participants, alpha=0.05):
         p.others_vector = (float(np.mean([v[0] for v in others])),
                            float(np.mean([v[1] for v in others]))) if others else (0.0, 0.0)
 
-    usable_conditions = list(CONDITIONS) if n_p >= 2 else ["A", "C"]
+    # ---- 조건 D: 참가자별 궤적 릿지 (학습 구간으로 적합 → 평가 구간 예측) ----
+    # C 는 상수 하나, D 는 시행마다 다른 보정량이다. 둘의 차이가 곧 "궤적이
+    # 편향을 설명하는가" 이며, 그것이 원래 명세서(§1.2)의 핵심 질문이다.
+    models = {}
+    for p_ in participants:
+        try:
+            models[p_.pid] = fit_participant_model(p_.train, p_.test)
+        except (np.linalg.LinAlgError, ValueError) as exc:
+            models[p_.pid] = {"offsets": np.zeros((len(p_.test), 2)), "error": f"{type(exc).__name__}: {exc}",
+                              "lambda": None, "cv_r2_train": None,
+                              "r2_test_vs_zero": None, "r2_test_vs_const": None,
+                              "coef": None, "intercept": None, "n_bad_theta": None}
+
+    usable_conditions = list(CONDITIONS) if n_p >= 2 else ["A", "C", "D"]
 
     # ---- 평가 구간에 세 조건 적용 ----
     pooled = {c: [] for c in CONDITIONS}       # 시행 단위 성공 0/1 (참가자 통합)
@@ -260,11 +413,13 @@ def analyze(participants, alpha=0.05):
 
     for p in participants:
         offsets = {"A": (0.0, 0.0), "B": p.others_vector, "C": p.vector}
+        pred = models[p.pid]["offsets"]      # D 는 시행마다 값이 다르다
         succ = {c: [] for c in CONDITIONS}
         dists = {c: [] for c in CONDITIONS}
-        for rec in p.test:
+        for k, rec in enumerate(p.test):
             for c in CONDITIONS:
-                ok, d = apply_correction(rec, offsets[c])
+                off = tuple(pred[k]) if c == "D" else offsets[c]
+                ok, d = apply_correction(rec, off)
                 succ[c].append(1 if ok else 0)
                 dists[c].append(d)
         for c in CONDITIONS:
@@ -285,6 +440,7 @@ def analyze(participants, alpha=0.05):
             "others_vector_px": {"x": p.others_vector[0], "y": p.others_vector[1]},
             "success_rate": {c: float(np.mean(succ[c])) if succ[c] else None for c in CONDITIONS},
             "mean_error_px": {c: float(np.mean(dists[c])) if dists[c] else None for c in CONDITIONS},
+            "ridge": {k: v for k, v in models[p.pid].items() if k != "offsets"},
         })
 
     # ---- §6.3 주 검정: 성공률 ----
@@ -347,6 +503,7 @@ def analyze(participants, alpha=0.05):
 
     # ---- §6.4 결론 ----
     verdict = decide(posthoc, pooled, usable_conditions, alpha, n_p)
+    verdict_d = decide_d(posthoc, per_participant, usable_conditions)
 
     return {
         "primary_metric": "success_rate (사전 확정, 계획서 §6.3)",
@@ -365,6 +522,7 @@ def analyze(participants, alpha=0.05):
         "sign_convention_check": sign_check,
         "per_participant": per_participant,
         "verdict": verdict,
+        "verdict_d": verdict_d,
     }
 
 
@@ -405,6 +563,62 @@ def decide(posthoc, pooled, used, alpha, n_p):
     return {"code": "correction_but_not_personal",
             "text": "C > A 인데 C ≈ B → 보정은 되지만 개인화는 무의미하다 "
                     "(다들 같은 방향으로 치우친다)"}
+
+
+def decide_d(posthoc, per_participant, used):
+    """조건 D 판정. §6.4 의 사전 확정 판정(A/B/C)과 분리해서 낸다.
+
+    D 는 계획서에 없던 조건이므로 주 판정을 대체하지 않는다. 대신 이 연구가 원래
+    묻던 것 — 궤적이 편향을 설명하는가(명세서 §1.2) — 에 답한다.
+    """
+    if "D" not in used:
+        return {"code": "no_d", "text": "조건 D 를 만들 수 없었습니다."}
+
+    def better(c1, c2):
+        key = f"{c1} vs {c2}" if f"{c1} vs {c2}" in posthoc else f"{c2} vs {c1}"
+        if key not in posthoc:
+            return None
+        item = posthoc[key]
+        rates = dict(zip(key.split(" vs "), item["success_rate"]))
+        return item["significant"] and rates[c1] > rates[c2]
+
+    d_gt_a = better("D", "A")
+    d_gt_b = better("D", "B") if "B" in used else None
+    d_gt_c = better("D", "C")
+
+    # 설명력을 상수 몫과 궤적 몫으로 가른다. D 가 이겼더라도 그 이득이 절편(=상수
+    # 보정)에서 온 것인지 궤적에서 온 것인지는 유의성만으로 알 수 없다.
+    shares = [(pp["ridge"].get("r2_const_share"), pp["ridge"].get("r2_traj_share"))
+              for pp in per_participant if pp.get("ridge", {}).get("r2_const_share") is not None]
+    n_traj_wins = sum(1 for c, t in shares if t > c)
+
+    parts = []
+    if d_gt_a:
+        parts.append("D > A")
+    if d_gt_b:
+        parts.append("D > B")
+    if d_gt_c:
+        parts.append("D > C")
+    won = ", ".join(parts) if parts else "유의한 우위 없음"
+
+    if d_gt_c:
+        code, text = "trajectory_helps", (
+            f"{won} → 궤적 모델이 개인 상수 보정보다 낫다. "
+            "명세서 §1.2 의 '궤적 기반 회귀' 가설이 지지된다.")
+    elif d_gt_a or d_gt_b:
+        code, text = "d_wins_but_not_over_c", (
+            f"{won} 이지만 D ≈ C → 궤적 모델이 기준선들보다는 낫지만, "
+            "개인 상수 보정보다 낫다고는 말할 수 없다.")
+    else:
+        code, text = "d_no_effect", (
+            "D 가 어떤 조건도 유의하게 이기지 못했다.")
+
+    if shares:
+        text += (f" 설명력 분해: {len(shares)}명 중 궤적 몫이 상수 몫보다 큰 사람은 "
+                 f"{n_traj_wins}명이다.")
+    return {"code": code, "text": text,
+            "d_gt_a": d_gt_a, "d_gt_b": d_gt_b, "d_gt_c": d_gt_c,
+            "n_traj_beats_const": n_traj_wins, "n_with_shares": len(shares)}
 
 
 # ---------------------------------------------------------------- 보고서 출력
@@ -482,7 +696,26 @@ def print_report(res, warnings, files):
               f"p_raw={fmt_p(item['p_raw'])}  p_bonf={fmt_p(item['p_bonferroni'])}"
               f"{'  *' if item['significant'] else ''}")
 
-    print("\n[6] 보조 지표")
+    print("\n[6] 조건 D — 궤적 릿지 모델 (참가자별)")
+    print("  입력 5개: 1, cosθ, sinθ, v_peak·cosθ, v_peak·sinθ")
+    print("  θ = 클릭 직전 20px 이동 구간의 방향 · v_peak = 전체 이동 중 최대 속력")
+    print("  둘 다 궤적에서만 뽑는다 — 버튼 좌표는 쓰지 않는다 (명세서 §1.3)")
+    print()
+    print(f"  {'ID':<16}{'λ':>8}{'상수 몫':>10}{'궤적 몫':>10}{'= R²(평가)':>12}{'θ 불량':>8}")
+    for pp in res["per_participant"]:
+        r = pp.get("ridge") or {}
+        if r.get("r2_const_share") is None:
+            print(f"  {pp['participant_id']:<16}  적합 실패: {r.get('error')}")
+            continue
+        mark = " ←궤적 우세" if r["r2_traj_share"] > r["r2_const_share"] else ""
+        print(f"  {pp['participant_id']:<16}{r['lambda']:>8.2f}{r['r2_const_share']*100:>9.2f}%"
+              f"{r['r2_traj_share']*100:>9.2f}%{r['r2_test_vs_zero']*100:>11.2f}%{r['n_bad_theta']:>8}{mark}")
+    print()
+    print("  '상수 몫' = 절편만으로 번 몫 (= 조건 C 가 하는 일)")
+    print("  '궤적 몫' = 그 위에 궤적 항이 더한 몫. 둘 다 '보정 안 함' 기준이라 더하면 R²(평가)다.")
+    print("  → D 가 이겼더라도 그 이득이 상수에서 왔는지 궤적에서 왔는지는 이 두 열이 가른다.")
+
+    print("\n[7] 보조 지표")
     for name, t in res["error_distance_paired_tests"].items():
         print(f"  오차 거리 {name:<10} Δ={t['mean_diff']:+.3f} px, d={t['cohen_d']:+.3f}, "
               f"t-p={fmt_p(t['t_p'])}, Wilcoxon-p={fmt_p(t['wilcoxon_p'])}")
@@ -493,8 +726,14 @@ def print_report(res, warnings, files):
             print(f"  반복측정 ANOVA ({label}): F({rm['df'][0]},{rm['df'][1]}) = {rm['F']:.3f}, "
                   f"p = {fmt_p(rm['p'])}, partial η² = {rm['partial_eta_sq']:.3f}")
 
-    print("\n[7] 결론 (§6.4)")
+    print("\n[8] 결론")
+    print("  ── 주 판정 (§6.4 · A/B/C, 데이터 보기 전 확정) ──")
     print("  " + res["verdict"]["text"])
+    vd = res.get("verdict_d")
+    if vd:
+        print()
+        print("  ── 조건 D 판정 (계획서에 없던 사후 추가) ──")
+        print("  " + vd["text"])
     print("=" * W)
 
 
